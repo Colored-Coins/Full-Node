@@ -52,7 +52,7 @@ module.exports = function (args) {
 
   var checkNextBlock = function (block, cb) {
     if (!block) return cb(null, blockStates.NOT_EXISTS, block)
-    redis.hget('block', block.height - 1, function (err, hash) {
+    redis.hget('blocks', block.height - 1, function (err, hash) {
       if (!hash || hash === block.previousblockhash) return cb(null, blockStates.GOOD, block)
       return cb(null, blockStates.FORKED, block)
     })
@@ -67,6 +67,7 @@ module.exports = function (args) {
   }
 
   var revertBlock = function (blockHeight, cb) {
+    console.log('forking block', blockHeight)
     var utxosChanges
     async.waterfall([
       function (cb) {
@@ -94,7 +95,7 @@ module.exports = function (args) {
       return parseNewBlock(block, cb)
     }
     if (state === blockStates.FORKED) {
-      return revertBlock(blockHeight - 1, cb)
+      return revertBlock(block.height - 1, cb)
     }
     cb('Unknown block state')
   }
@@ -176,8 +177,7 @@ module.exports = function (args) {
 
   var updateLastBlock = function (blockHeight, blockHash, cb) {
     if (typeof blockHash === 'function') {
-      cb = blockHash
-      blockHash = '00'
+      return redis.hmset('blocks', 'lastBlockHeight', blockHeight, blockHash)
     }
     redis.hmset('blocks', blockHeight, blockHash, 'lastBlockHeight', blockHeight, cb)
   }
@@ -198,12 +198,7 @@ module.exports = function (args) {
       function (cb) {
         updateLastBlock(block.height, block.hash, cb)
       }
-    ], function (err) {
-      if (utxosChanges.unused.length && utxosChanges.used.length) {
-        throw ('last update:', utxosChanges)
-      }
-      cb()
-    })
+    ], cb)
   }
 
   var decodeRawTransaction = function (tx) {
@@ -264,7 +259,10 @@ module.exports = function (args) {
       console.log('updating block transactions')
       console.time('updating block transactions')
       console.log('utxosChanges', JSON.stringify(utxosChanges))
-      updateUtxosChanges(block, utxosChanges, cb)
+      updateUtxosChanges(block, utxosChanges, function (err) {
+        console.timeEnd('updating block transactions')
+        cb(err)
+      })
     })
   }
 
@@ -273,14 +271,12 @@ module.exports = function (args) {
   }
 
   var finishParsing = function (err)  {
-    console.timeEnd('updating block transactions')
     if (err) console.error(err)
     // setTimeout(parse, 1000)
     parse()
   }
 
   var parse = function () {
-    console.log('starting parse loop')
     async.waterfall([
       getNextBlockHeight,
       getNextBlock,
