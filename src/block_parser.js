@@ -34,9 +34,15 @@ module.exports = function (args) {
     console.log('getting block', height)
     console.time('getting block', height)
     bitcoin.cmd('getblockhash', [height], function (err, hash) {
-      if (err) return cb(err)
+      if (err) {
+        if (err.code && err.code === -8) {
+          return cb(null, null)
+        }
+        return cb(err)
+      }
       bitcoin.cmd('getblock', [hash, false], function (err, rawBlock) {
         if (err) return cb(err)
+        // console.log('blockhex', rawBlock)
         var block = bitcoinjs.Block.fromHex(rawBlock)
         block.height = height
         block.hash = hash
@@ -87,10 +93,10 @@ module.exports = function (args) {
   }
 
   var conditionalParseNextBlock = function (state, block, cb) {
-    console.log('block', block.hash, block.height, 'txs:', block.transactions.length, 'state', state)
     if (state === blockStates.NOT_EXISTS) {
       return mempoolParse(cb)
     }
+    console.log('block', block.hash, block.height, 'txs:', block.transactions.length, 'state', state)
     if (state === blockStates.GOOD) {
       return parseNewBlock(block, cb)
     }
@@ -266,8 +272,35 @@ module.exports = function (args) {
     })
   }
 
-  var mempoolParse = function (cb) {
+  var revertMempoolTransactions = function (cb) {
     return cb()
+  }
+
+  var getMempoolTxids = function (cb) {
+    return cb(null, null)
+  }
+
+  var categorizeMempoolTxids = function (mempoolTxids, cb) {
+    return cb(null, null)
+  }
+
+  var getNewMempoolTransaction = function (newMempoolTxids, cb) {
+    return cb(null, null)
+  }
+
+  var parseNewMempoolTransactions = function (newMempoolTransactions, cb) {
+    return cb(null, null)
+  }
+
+  var mempoolParse = function (cb) {
+    console.log('parsing mempool')
+    async.waterfall([
+      revertMempoolTransactions,
+      getMempoolTxids,
+      categorizeMempoolTxids,
+      getNewMempoolTransaction,
+      parseNewMempoolTransactions
+    ], cb)
   }
 
   var finishParsing = function (err)  {

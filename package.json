@@ -17,7 +17,7 @@
   "dependencies": {
     "async": "^2.1.4",
     "bitcoin-async": "^1.0.0",
-    "bitcoinjs-lib": "^2.3.0",
+    "bitcoinjs-lib": "git://github.com/bitcoinjs/bitcoinjs-lib.git#b590d3406c8ff02e59cbb483fb071e7ee8094129",
     "cc-get-assets-outputs": "^1.2.0",
     "cc-transaction": "^1.2.0",
     "level": "^1.6.0",
