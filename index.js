@@ -2,46 +2,33 @@ var redis = require('redis')
 var async = require('async')
 var bitcoin = require('bitcoin-async')
 var levelup = require('level')
-
-var redisHost = process.env.REDIS_HOST || 'localhost'
-var redisPort = process.env.REDIS_PORT || '6379'
-var network = process.env.NETWORK || 'testnet'
-// var bitcoinHost = process.env.BITCOIN_HOST || 'testnet.api.colu.co'
-var bitcoinHost = process.env.BITCOIN_HOST || '127.0.0.1'
-var bitcoinPort = process.env.BITCOIN_PORT || '8332'
-// var bitcoinUser = process.env.RPCUSERNAME || 'colu'
-var bitcoinUser = process.env.RPCUSERNAME || 'tal'
-// var bitcoinPass = process.env.RPCPASSWORD || '123123'
-var bitcoinPass = process.env.RPCPASSWORD || 'YutvwTMUFQYg5UDY6ysX'
-var bitcoinPath = process.env.BITCOINPATH || '/'
-var bitcoinTimeout = parseInt(process.env.BITCOINTIMEOUT || 30000, 10)
-var levelLocation = process.env.LEVEL_LOCATION || './db'
+var config = require('./utils/config')('./properties.conf')
 
 var redisOptions = {
-  host: redisHost,
-  port: redisPort,
-  prefix: 'ccfullnode:' + network + ':'
+  host: config.redisHost,
+  port: config.redisPort,
+  prefix: 'ccfullnode:' + config.network + ':'
 }
 
 var redisClient = redis.createClient(redisOptions)
 
 var bitcoinOptions = {
-  host: bitcoinHost,
-  port: bitcoinPort,
-  user: bitcoinUser,
-  pass: bitcoinPass,
-  path: bitcoinPath,
-  timeout: bitcoinTimeout
+  host: config.bitcoinHost,
+  port: config.bitcoinPort,
+  user: config.bitcoinUser,
+  pass: config.bitcoinPass,
+  path: config.bitcoinPath,
+  timeout: config.bitcoinTimeout
 }
 
 var bitcoinRpc = new bitcoin.Client(bitcoinOptions)
 
-levelup(levelLocation, function (err, db) {
+levelup(config.levelLocation, function (err, db) {
   if (err) throw err
   var parserOptions = {
     redis: redisClient,
     bitcoin: bitcoinRpc,
-    network: network,
+    network: config.network,
     level: db
   }
   var parser = require('./src/block_parser')(parserOptions)

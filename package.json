@@ -20,7 +20,10 @@
     "bitcoinjs-lib": "git://github.com/bitcoinjs/bitcoinjs-lib.git#b590d3406c8ff02e59cbb483fb071e7ee8094129",
     "cc-get-assets-outputs": "^1.2.0",
     "cc-transaction": "^1.2.0",
+    "iniparser": "^1.0.5",
     "level": "^1.6.0",
-    "redis": "^2.6.5"
+    "lodash": "^4.17.4",
+    "redis": "^2.6.5",
+    "toposort": "^1.0.3"
   }
 }
