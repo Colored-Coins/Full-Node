@@ -29,7 +29,8 @@ levelup(config.levelLocation, function (err, db) {
     redis: redisClient,
     bitcoin: bitcoinRpc,
     network: config.network,
-    level: db
+    level: db,
+    debug: config.debug
   }
   var parser = require('./src/block_parser')(parserOptions)
   parser.parse()  

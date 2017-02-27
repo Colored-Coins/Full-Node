@@ -22,6 +22,10 @@ module.exports = function (args) {
   var network = args.network
   var bitcoinNetwork = (network === 'mainnet') ? bitcoinjs.networks.bitcoin : bitcoinjs.networks.testnet
   var level = args.level
+  var debug = args.debug
+  if (!debug) {
+    console.log = function () {}
+  }
 
   var getNextBlockHeight = function (cb) {
     redis.hget('blocks', 'lastBlockHeight', function (err, lastBlockHeight) {
@@ -33,8 +37,6 @@ module.exports = function (args) {
   }
 
   var getNextBlock = function (height, cb) {
-    // console.log('getting block', height)
-    // console.time('getting block', height)
     bitcoin.cmd('getblockhash', [height], function (err, hash) {
       if (err) {
         if (err.code && err.code === -8) {
@@ -44,7 +46,6 @@ module.exports = function (args) {
       }
       bitcoin.cmd('getblock', [hash, false], function (err, rawBlock) {
         if (err) return cb(err)
-        // console.log('blockhex', rawBlock)
         var block = bitcoinjs.Block.fromHex(rawBlock)
         block.height = height
         block.hash = hash
@@ -52,7 +53,6 @@ module.exports = function (args) {
         block.transactions = block.transactions.map(function (transaction) {
           return decodeRawTransaction(transaction)
         })
-        // console.timeEnd('getting block', height)
         cb(null, block)
       })
     })
@@ -163,7 +163,6 @@ module.exports = function (args) {
 
   var parseTransaction = function (transaction, utxosChanges, blockHeight, cb) {
     var coloredData = getColoredData(transaction)
-    // console.log('txid', transaction.txid, 'coloredData', coloredData)
     transaction.ccdata = [coloredData]
     async.each(transaction.vin, function (input, cb) {
       var previousOutput = input.txid + ':' + input.vout
@@ -258,11 +257,9 @@ module.exports = function (args) {
   var updateUtxosChanges = function (block, utxosChanges, cb) {
     async.waterfall([
       function (cb) {
-        console.time('saveUtxoChangeObject')
         saveUtxoChangeObject(block.height, utxosChanges, cb)
       },
       function (cb) {
-        console.timeEnd('saveUtxoChangeObject')
         saveNewUtxos(utxosChanges.unused, cb)
       },
       function (cb) {
@@ -360,8 +357,6 @@ module.exports = function (args) {
     var txids = []
     async.waterfall([
       function (cb) {
-        console.log('parsing block transactions')
-        console.time('parsing block transactions')
         async.eachSeries(block.transactions, function (transaction, cb) {
           utxosChanges.txids.push(transaction.txid)
           parseTransaction(transaction, utxosChanges, block.height, cb)
@@ -369,14 +364,7 @@ module.exports = function (args) {
       }
     ], function (err) {
       if (err) return cb(err)
-      console.timeEnd('parsing block transactions')
-      console.log('updating block transactions')
-      console.time('updating block transactions')
-      // console.log('utxosChanges', JSON.stringify(utxosChanges))
-      updateUtxosChanges(block, utxosChanges, function (err) {
-        console.timeEnd('updating block transactions')
-        cb(err)
-      })
+      updateUtxosChanges(block, utxosChanges, cb)
     })
   }
 
@@ -404,7 +392,6 @@ module.exports = function (args) {
   }
 
   var categorizeMempoolTxids = function (mempoolTxids, cb) {
-    // console.log('mempoolTxids', mempoolTxids)
     var newMempoolTxids
     async.waterfall([
       function (cb) {
@@ -413,11 +400,8 @@ module.exports = function (args) {
       function (mempool, cb) {
         mempool = mempool || '[]'
         var parsedMempoolTxids = JSON.parse(mempool)
-        // console.log('parsedMempoolTxids', parsedMempoolTxids)
         newMempoolTxids = _.difference(mempoolTxids, parsedMempoolTxids)
-        // console.log('newMempoolTxids', newMempoolTxids)
         var toRevertMempoolTxids = _.difference(parsedMempoolTxids, mempoolTxids)
-        // console.log('toRevertMempoolTxids', toRevertMempoolTxids)
         redis.hmset('mempool', 'torevert', JSON.stringify(toRevertMempoolTxids), cb)
       }, function (res, cb) {
         cb(null, newMempoolTxids)
@@ -459,7 +443,6 @@ module.exports = function (args) {
 
   var parseNewMempoolTransactions = function (newMempoolTransactions, cb) {
     newMempoolTransactions = orderByDependencies(newMempoolTransactions)
-    // console.log('ordered newMempoolTransactions', newMempoolTransactions.map(transaction => {return transaction.txid}))
     async.eachSeries(newMempoolTransactions, function (newMempoolTransaction, cb) {
       var utxosChanges = {
         used: {},
@@ -467,7 +450,6 @@ module.exports = function (args) {
       }
       parseTransaction(newMempoolTransaction, utxosChanges, -1, function (err) {
         if (err) return cb(err)
-        // console.log(newMempoolTransaction.txid, utxosChanges)
         updateMempoolTransactionUtxodChanges(newMempoolTransaction.txid, utxosChanges, cb)
       })
     }, cb)
@@ -486,7 +468,6 @@ module.exports = function (args) {
 
   var finishParsing = function (err)  {
     if (err) console.error(err)
-    // setTimeout(parse, 1000)
     parse()
   }
 
