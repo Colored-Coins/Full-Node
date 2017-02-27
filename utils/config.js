@@ -20,7 +20,7 @@ module.exports = function (propertiesFile) {
   properties.bitcoinPass = properties.bitcoinPass || process.env.RPCPASSWORD || 'rpcpass'
   properties.bitcoinPath = properties.bitcoinPath || process.env.BITCOINPATH || '/'
   properties.bitcoinTimeout = parseInt(properties.bitcoinTimeout || process.env.BITCOINTIMEOUT || 30000, 10)
-  properties.levelLocation = properties.levelLocation || process.env.LEVEL_LOCATION || './db'
+  properties.levelLocation = properties.levelLocation || process.env.LEVEL_LOCATION || './' + properties.network + '_db'
   properties.debug = (properties.debug || process.env.FULL_NODE_DEBUG || 'false') == 'true'
 
   return properties
