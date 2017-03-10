@@ -1,7 +1,6 @@
 var redis = require('redis')
 var async = require('async')
 var bitcoin = require('bitcoin-async')
-var levelup = require('level')
 var config = require('./utils/config')('./properties.conf')
 
 var redisOptions = {
@@ -23,16 +22,17 @@ var bitcoinOptions = {
 
 var bitcoinRpc = new bitcoin.Client(bitcoinOptions)
 
-levelup(config.levelLocation, function (err, db) {
-  if (err) throw err
-  var parserOptions = {
-    redis: redisClient,
-    bitcoin: bitcoinRpc,
-    network: config.network,
-    level: db,
-    debug: config.debug
-  }
-  var parser = require('./src/block_parser')(parserOptions)
-  parser.parse()  
-
+var parserOptions = {
+  redis: redisClient,
+  bitcoin: bitcoinRpc,
+  network: config.network,
+  debug: config.debug
+}
+var parser = require('./src/block_parser')(parserOptions)
+parser.parse(function (info) {
+  console.log('info', info)
 })
+// parser.getAddressesUtxos(['mxNL1rF87rfBEKtUfQ8YDg2r4crYn6hUDh', 'mhPee3aTfto9f5MLyLwwPu2wD3KoWn85fo'], function (err, utxos) {
+//   if (err) return console.error(err)
+//   console.log('utxos', utxos)
+// })

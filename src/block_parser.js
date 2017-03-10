@@ -15,17 +15,21 @@ var blockStates = {
   FORKED: 2
 }
 
+var label = 'cc-full-node'
+
 module.exports = function (args) {
 
   var redis = args.redis
   var bitcoin = args.bitcoin
   var network = args.network
   var bitcoinNetwork = (network === 'mainnet') ? bitcoinjs.networks.bitcoin : bitcoinjs.networks.testnet
-  var level = args.level
   var debug = args.debug
+  
   if (!debug) {
     console.log = function () {}
   }
+
+  var info = {}
 
   var getNextBlockHeight = function (cb) {
     redis.hget('blocks', 'lastBlockHeight', function (err, lastBlockHeight) {
@@ -62,74 +66,20 @@ module.exports = function (args) {
     if (!block) return cb(null, blockStates.NOT_EXISTS, block)
     redis.hget('blocks', block.height - 1, function (err, hash) {
       if (!hash || hash === block.previousblockhash) return cb(null, blockStates.GOOD, block)
-      return cb(null, blockStates.FORKED, block)
-    })
-  }
-
-  var getUtxosChanges = function (blockHeight, cb) {
-    level.get('rev_block_' + blockHeight, function (err, utxosChanges) {
-      if (err) return cb(err)
-      utxosChanges = JSON.parse(utxosChanges)
-      cb(null, utxosChanges)
+      cb(null, blockStates.FORKED, block)
     })
   }
 
   var revertBlock = function (blockHeight, cb) {
     console.log('forking block', blockHeight)
-    var utxosChanges
-    async.waterfall([
-      function (cb) {
-        getUtxosChanges(blockHeight, cb)
-      },
-      function (_utxosChanges, cb) {
-        utxosChanges = _utxosChanges
-        saveNewUtxos(utxosChanges.used, cb)
-      },
-      function (cb) {
-        removeSpents(utxosChanges.unused, cb)
-      },
-      function (cb) {
-        updateLastBlock(blockHeight - 1, cb)
-      }
-    ], cb)
-  }
-
-  var getUtxosChangesForMempoolTransaction = function (txid, cb) {
-    level.get('rev_mempool_tx_' + txid, function (err, utxosChanges) {
-      if (err) return cb(err)
-      utxosChanges = JSON.parse(utxosChanges)
-      cb(null, utxosChanges)
-    })
-  }
-
-  var setUnusedUtxos = function (used, cb) {
-    async.each(Object.keys(used), function (key, cb) {
-      redis.hmset(key, 'used', false, cb)
-    }, cb)
-  }
-
-  var revertMempoolTransaction = function (txid, cb) {
-    console.log('revertMempoolTransaction', txid)
-    var utxosChanges
-    async.waterfall([
-      function (cb) {
-        getUtxosChangesForMempoolTransaction(txid, cb)
-      },
-      function (_utxosChanges, cb) {
-        utxosChanges = _utxosChanges
-        setUnusedUtxos(utxosChanges.used, cb)
-      },
-      function (cb) {
-        removeSpents(utxosChanges.unused, cb)
-      }
-    ], cb)
+    updateLastBlock(blockHeight - 1, cb)
   }
 
   var conditionalParseNextBlock = function (state, block, cb) {
     if (state === blockStates.NOT_EXISTS) {
       return mempoolParse(cb)
     }
-    console.log('block', block.hash, block.height, 'txs:', block.transactions.length, 'state', state)
+    // console.log('block', block.hash, block.height, 'txs:', block.transactions.length, 'state', state)
     if (state === blockStates.GOOD) {
       return parseNewBlock(block, cb)
     }
@@ -162,94 +112,44 @@ module.exports = function (args) {
   }
 
   var parseTransaction = function (transaction, utxosChanges, blockHeight, cb) {
-    var coloredData = getColoredData(transaction)
-    transaction.ccdata = [coloredData]
     async.each(transaction.vin, function (input, cb) {
       var previousOutput = input.txid + ':' + input.vout
       if (utxosChanges.unused[previousOutput]) {
-        utxosChanges.used[previousOutput] = utxosChanges.unused[previousOutput]
-        input.assets = JSON.parse(utxosChanges.unused[previousOutput].assets)
-        if (~blockHeight) {
-          delete utxosChanges.unused[previousOutput]
-        } else {
-          utxosChanges.unused[previousOutput].used = true
-        }
-        return cb()
+        input.assets = JSON.parse(utxosChanges.unused[previousOutput])
+        return process.nextTick(cb)
       }
-      redis.hgetall(previousOutput, function (err, utxo) {
+      redis.hget('utxos', previousOutput, function (err, assets) {
         if (err) return cb(err)
-        input.assets = utxo && utxo.assets && JSON.parse(utxo && utxo.assets) || []
+        input.assets = assets && JSON.parse(assets) || []
         if (input.assets.length) {
-          utxosChanges.used[previousOutput] = utxo
-          utxosChanges.used[previousOutput].used = true
+          utxosChanges.used[previousOutput] = assets
         }
         cb()
       })
     }, function (err) {
       if (err) return cb(err)
-      if (!coloredData) return cb()
       var outputsAssets = getAssetsOutputs(transaction)
-      async.eachSeries(outputsAssets, function (assets, cb) {
-        if (!assets || !assets.length) {
-          return cb()
+      outputsAssets.forEach(function (assets, outputIndex) {
+        if (assets && assets.length) {
+          utxosChanges.unused[transaction.txid + ':' + outputIndex] = JSON.stringify(assets)
         }
-        var outputIndex = outputsAssets.indexOf(assets)
-        redis.hgetall(transaction.txid + ':' + outputIndex, function (err, utxo) {
-          if (err) return cb(err)
-          utxosChanges.unused[transaction.txid + ':' + outputIndex] = utxo ? utxo : {
-            assets: JSON.stringify(assets),
-            used: false
-          }
-          utxosChanges.unused[transaction.txid + ':' + outputIndex].blockHeight = blockHeight
-          cb()
-        })
-      }, cb)
+      })
+      cb()
     })
   }
-  var saveUtxoChangeObject = function (blockHeight, utxosChanges, cb) {
-    level.put('rev_block_' + blockHeight, JSON.stringify(utxosChanges), {sync: true}, cb)
-  }
 
-  var saveNewUtxos = function (utxos, cb) {
-    async.each(Object.keys(utxos), function (key, cb) {
-      var utxo = utxos[key]
-      redis.hmset(key, utxo, cb)
+  var setTxos = function (utxos, cb) {
+    async.each(Object.keys(utxos), function (utxo, cb) {
+      var assets = utxos[utxo]
+      redis.hmset('utxos', utxo, assets, cb)
     }, cb)
   }
 
-  var removeSpents = function (used, cb) {
-    async.each(Object.keys(used), function (txo, cb) {
-      redis.del(txo, cb)
-    }, cb)
-  }
-
-  var usedSpents = function (utxos, cb) {
-    async.each(Object.keys(utxos), function (key, cb) {
-      var utxo = utxos[key]
-      redis.hmset(key, utxo, cb)
-    }, cb)
-  }
-
-  var updateLastBlock = function (blockHeight, blockHash, cb) {
+  var updateLastBlock = function (blockHeight, blockHash, timestamp, cb) {
     if (typeof blockHash === 'function') {
       return redis.hmset('blocks', 'lastBlockHeight', blockHeight, blockHash)
     }
-    redis.hmset('blocks', blockHeight, blockHash, 'lastBlockHeight', blockHeight, cb)
-  }
-
-  var removeToRevertTxids = function (txids, cb) {
-    async.waterfall([
-      function (cb) {
-        redis.hgetall('mempool', cb)
-      },
-      function (mempool, cb) {
-        mempoolRevert = JSON.parse(mempool && mempool.torevert || '[]')
-        mempoolRevert = _.difference(mempoolRevert, txids)
-        mempoolParsed = JSON.parse(mempool && mempool.parsed || '[]')
-        mempoolParsed = _.difference(mempoolParsed, txids)
-        redis.hmset('mempool', 'torevert', JSON.stringify(mempoolRevert), 'parsed', JSON.stringify(mempoolParsed), cb)
-      }
-    ], function (err) {
+    redis.hmset('blocks', blockHeight, blockHash, 'lastBlockHeight', blockHeight, 'lastTimestamp', timestamp, function (err) {
       cb(err)
     })
   }
@@ -257,28 +157,15 @@ module.exports = function (args) {
   var updateUtxosChanges = function (block, utxosChanges, cb) {
     async.waterfall([
       function (cb) {
-        saveUtxoChangeObject(block.height, utxosChanges, cb)
+        setTxos(utxosChanges.unused, cb)
       },
       function (cb) {
-        saveNewUtxos(utxosChanges.unused, cb)
-      },
-      function (cb) {
-        removeSpents(utxosChanges.used, cb)
-      },
-      function (cb) {
-        removeToRevertTxids(utxosChanges.txids, cb)
-      },
-      function (cb) {
-        updateLastBlock(block.height, block.hash, cb)
+        updateLastBlock(block.height, block.hash, block.timestamp, cb)
       }
     ], cb)
   }
 
-  var saveUtxoMempoolTransactionChangeObject = function (txid, utxosChanges, cb) {
-    level.put('rev_mempool_tx_' + txid, JSON.stringify(utxosChanges), {sync: true}, cb)
-  }
-
-  var updateParsedMempoolTxid = function (txids, cb) {
+  var updateParsedMempoolTxids = function (txids, cb) {
     async.waterfall([
       function (cb) {
         redis.hget('mempool', 'parsed', cb)
@@ -294,19 +181,13 @@ module.exports = function (args) {
     })
   }
 
-  var updateMempoolTransactionUtxodChanges = function (txid, utxosChanges, cb) {
+  var updateMempoolTransactionUtxosChanges = function (txid, utxosChanges, cb) {
     async.waterfall([
       function (cb) {
-        saveUtxoMempoolTransactionChangeObject(txid, utxosChanges, cb)
+        setTxos(utxosChanges.unused, cb)
       },
       function (cb) {
-        saveNewUtxos(utxosChanges.unused, cb)
-      },
-      function (cb) {
-        usedSpents(utxosChanges.used, cb)
-      },
-      function (cb) {
-        updateParsedMempoolTxid([txid], cb)
+        updateParsedMempoolTxids([txid], cb)
       }
     ], cb)
   }
@@ -349,64 +230,37 @@ module.exports = function (args) {
   }
 
   var parseNewBlock = function (block, cb) {
+    info.timestamp = block.timestamp
+    info.height = block.height
     var utxosChanges = {
       used: {},
       unused: {},
       txids: []
     }
-    var txids = []
-    async.waterfall([
-      function (cb) {
-        async.eachSeries(block.transactions, function (transaction, cb) {
-          utxosChanges.txids.push(transaction.txid)
-          parseTransaction(transaction, utxosChanges, block.height, cb)
-        }, cb)
-      }
-    ], function (err) {
+    async.eachSeries(block.transactions, function (transaction, cb) {
+      utxosChanges.txids.push(transaction.txid)
+      var coloredData = getColoredData(transaction)
+      if (!coloredData) return process.nextTick(cb)
+      transaction.ccdata = [coloredData]
+      parseTransaction(transaction, utxosChanges, block.height, cb)
+    }, function (err) {
       if (err) return cb(err)
       updateUtxosChanges(block, utxosChanges, cb)
     })
-  }
-
-  var revertMempoolTransactions = function (cb) {
-    async.waterfall([
-      function (cb) {
-        redis.hget('mempool', 'torevert', cb)
-      },
-      function (mempoolRevert, cb) {
-        mempoolRevert = JSON.parse(mempoolRevert || '[]')
-        var txids = []
-        async.eachSeries(mempoolRevert, function (txid, cb) {
-          txids.push(txid)
-          revertMempoolTransaction(txid, cb)
-        }, function (err) {
-          if (err) return cb(err)
-          removeToRevertTxids(txids, cb)
-        }) 
-      }
-    ], cb)
   }
 
   var getMempoolTxids = function (cb) {
     bitcoin.cmd('getrawmempool', [], cb)
   }
 
-  var categorizeMempoolTxids = function (mempoolTxids, cb) {
-    var newMempoolTxids
-    async.waterfall([
-      function (cb) {
-        redis.hget('mempool', 'parsed', cb)
-      },
-      function (mempool, cb) {
-        mempool = mempool || '[]'
-        var parsedMempoolTxids = JSON.parse(mempool)
-        newMempoolTxids = _.difference(mempoolTxids, parsedMempoolTxids)
-        var toRevertMempoolTxids = _.difference(parsedMempoolTxids, mempoolTxids)
-        redis.hmset('mempool', 'torevert', JSON.stringify(toRevertMempoolTxids), cb)
-      }, function (res, cb) {
-        cb(null, newMempoolTxids)
-      }
-    ], cb)
+  var getNewMempoolTxids = function (mempoolTxids, cb) {
+    redis.hget('mempool', 'parsed', function (err, mempool) {
+      if (err) return cb(err)
+      mempool = mempool || '[]'
+      var parsedMempoolTxids = JSON.parse(mempool)
+      newMempoolTxids = _.difference(mempoolTxids, parsedMempoolTxids)
+      cb(null, newMempoolTxids)
+    })
   }
 
   var getNewMempoolTransaction = function (newMempoolTxids, cb) {
@@ -443,24 +297,45 @@ module.exports = function (args) {
 
   var parseNewMempoolTransactions = function (newMempoolTransactions, cb) {
     newMempoolTransactions = orderByDependencies(newMempoolTransactions)
+    var nonColoredTxids  = []
     async.eachSeries(newMempoolTransactions, function (newMempoolTransaction, cb) {
       var utxosChanges = {
         used: {},
         unused: {}
       }
+      var coloredData = getColoredData(newMempoolTransaction)
+      if (!coloredData) {
+        nonColoredTxids.push(newMempoolTransaction.txid)
+        return process.nextTick(cb)
+      }
+      newMempoolTransaction.ccdata = [coloredData]
       parseTransaction(newMempoolTransaction, utxosChanges, -1, function (err) {
         if (err) return cb(err)
-        updateMempoolTransactionUtxodChanges(newMempoolTransaction.txid, utxosChanges, cb)
+        updateMempoolTransactionUtxosChanges(newMempoolTransaction.txid, utxosChanges, cb)
       })
-    }, cb)
+    }, function (err) {
+      if (err) return cb(err)
+      updateParsedMempoolTxids(nonColoredTxids, cb)
+    })
+  }
+
+  var updateInfo = function (cb) {
+    if (info.height && info.timestamp) return process.nextTick(cb)
+    redis.hmget('blocks', 'lastBlockHeight', 'lastTimestamp', function (err, arr) {
+      if (err) return cb(err)
+      if (!arr || arr.length < 2) return process.nextTick(cb)
+      info.height = arr[0]
+      info.timestamp = arr[1]
+      cb()
+    })
   }
 
   var mempoolParse = function (cb) {
-    console.log('parsing mempool')
+    // console.log('parsing mempool')
     async.waterfall([
-      revertMempoolTransactions,
+      updateInfo,
       getMempoolTxids,
-      categorizeMempoolTxids,
+      getNewMempoolTxids,
       getNewMempoolTransaction,
       parseNewMempoolTransactions
     ], cb)
@@ -471,16 +346,99 @@ module.exports = function (args) {
     parse()
   }
 
-  var parse = function () {
+  var importAddresses = function (addresses, cb) {
+    var newAddresses
+    var importedAddresses
     async.waterfall([
+      function (cb) {
+        redis.hget('addresses', 'imported', cb)
+      },
+      function (_importedAddresses, cb) {
+        importedAddresses = _importedAddresses || '[]'
+        importedAddresses = JSON.parse(importedAddresses)
+        newAddresses = _.difference(addresses, importedAddresses)
+        if (newAddresses.length < 2) return process.nextTick(cb)
+        var commandsArr = newAddresses.splice(0, newAddresses.length - 1).map(function (address) {
+          return {
+            method: 'importaddress',
+            params: [address, label, false]
+          }
+        })
+        bitcoin.cmd(commandsArr, function (ans, cb) { return process.nextTick(cb)}, cb)
+      },
+      function (cb) {
+        if (!newAddresses.length) return process.nextTick(cb)
+        var waitForBitcoinReparse = function (err) {
+          if (err) {
+            return setTimeout(function() { 
+              console.log('Waiting for bitcoin to finnish reparsing...')
+              bitcoin.cmd('getinfo', [], waitForBitcoinReparse)
+            }, 1000)
+          }
+          cb()
+        }
+        bitcoin.cmd('importaddress', [newAddresses[0], label, true], waitForBitcoinReparse)
+      },
+      function (cb) {
+        newAddresses = _.difference(addresses, importedAddresses)
+        if (!newAddresses.length) return process.nextTick(cb)
+        importedAddresses = importedAddresses.concat(newAddresses)
+        redis.hmset('addresses', 'imported', JSON.stringify(importedAddresses), function (err) {
+          cb(err)
+        })
+      }
+    ] ,cb)
+  }
+
+  var parse = function (addresses, progressCallback) {
+    if (typeof addresses === 'function') {
+      progressCallback = addresses
+      addresses = null
+    }
+
+    if (progressCallback) {
+      setInterval(function () { progressCallback(info) }, 5000);
+    }
+
+    async.waterfall([
+      function (cb) {
+        if (!addresses || !Array.isArray(addresses)) return process.nextTick(cb)
+        importAddresses(addresses, cb)
+      },
       getNextBlockHeight,
       getNextBlock,
       checkNextBlock,
       conditionalParseNextBlock
-    ], finishParsing)
+    ], finishParsing) 
+  }
+
+  var getAddressesUtxos = function (addresses, numOfConfirmations, cb) {
+    if (typeof numOfConfirmations === 'function') {
+      cb = numOfConfirmations
+      numOfConfirmations = 0
+    }
+    bitcoin.cmd('listunspent', [numOfConfirmations, 99999999, addresses], function (err, utxos) {
+      if (err) return cb(err)
+      async.each(utxos, function (utxo, cb) {
+        redis.hget('utxos', utxo.txid + ':' + utxo.vout, function (err, assets) {
+          if (err) return cb(err)
+          utxo.assets = assets && JSON.parse(assets) || []
+          cb()
+        })
+      }, function (err) {
+        if (err) return cb(err)
+        cb(null, utxos)
+      })
+    })
+  }
+
+  var transmit = function (txHex, cb) {
+    bitcoin_rpc.cmd('sendrawtransaction', [txHex], cb)
   }
 
   return {
-    parse: parse
+    parse: parse,
+    getAddressesUtxos: getAddressesUtxos,
+    transmit: transmit
   }  
 }
