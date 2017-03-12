@@ -34,5 +34,9 @@ parser.parse(function (info) {
 })
 // parser.getAddressesUtxos(['mxNL1rF87rfBEKtUfQ8YDg2r4crYn6hUDh', 'mhPee3aTfto9f5MLyLwwPu2wD3KoWn85fo'], function (err, utxos) {
 //   if (err) return console.error(err)
-//   console.log('utxos', utxos)
+//   console.log('utxos', JSON.stringify(utxos))
 // })
+parser.getAddressesTransactions(['mxNL1rF87rfBEKtUfQ8YDg2r4crYn6hUDh', 'mhPee3aTfto9f5MLyLwwPu2wD3KoWn85fo'], function (err, transactions) {
+  if (err) return console.error(err)
+  console.log('transactions', JSON.stringify(transactions))
+})

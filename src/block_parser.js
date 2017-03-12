@@ -268,8 +268,8 @@ module.exports = function (args) {
       return { method: 'getrawtransaction', params: [txid, 0]}
     })
     var newMempoolTransactions = []
-    bitcoin.cmd(commandsArr, function (rawTrasaction, cb) {
-      var newMempoolTransaction = decodeRawTransaction(bitcoinjs.Transaction.fromHex(rawTrasaction))
+    bitcoin.cmd(commandsArr, function (rawTransaction, cb) {
+      var newMempoolTransaction = decodeRawTransaction(bitcoinjs.Transaction.fromHex(rawTransaction))
       newMempoolTransactions.push(newMempoolTransaction)
       cb()
     },
@@ -436,9 +436,80 @@ module.exports = function (args) {
     bitcoin_rpc.cmd('sendrawtransaction', [txHex], cb)
   }
 
+  var addColoredInputs = function (transaction, cb) {
+    async.each(transaction.vin, function (input, cb) {
+      redis.hget('utxos', input.txid + ':' + input.vout, function (err, assets) {
+        if (err) return cb(err)
+        assets = assets && JSON.parse(assets) || []
+        input.assets = assets
+        cb()
+      })
+    }, function (err) {
+      if (err) return cb(err)
+      cb(null, transaction)
+    })
+  }
+
+  var addColoredOutputs = function (transaction, cb) {
+    async.each(transaction.vout, function (output, cb) {
+      redis.hget('utxos', transaction.txid + ':' + output.n, function (err, assets) {
+        if (err) return cb(err)
+        assets = assets && JSON.parse(assets) || []
+        output.assets = assets
+        cb()
+      })
+    }, function (err) {
+      if (err) return cb(err)
+      cb(null, transaction)
+    })
+  }
+
+  var addColoredIOs = function (transaction, cb) {
+    async.waterfall([
+      function (cb) {
+        addColoredInputs(transaction, cb)
+      },
+      function (transaction, cb) {
+        addColoredOutputs(transaction, cb)
+      }
+    ], cb)
+  }
+
+  var getAddressesTransactions = function (addresses, cb) {
+    var next = true
+    var txids = []
+    var skip = 0
+    var count = 10
+    async.whilst(function () { return next }, function (cb) {
+      bitcoin.cmd('listtransactions', [label, count, skip, true], function (err, transactions) {
+        if (err) return cb(err)
+        skip+=count
+        transactions.forEach(function (transaction) {
+          if (~addresses.indexOf(transaction.address) && !~txids.indexOf(transaction.txid)) {
+            txids.push(transaction.txid)
+          }
+        })
+        if (transactions.length < count) {
+          next = false
+        }
+        cb()
+      })
+    }, function (err) {
+      if (err) return cb(err)
+      async.map(txids, function (txid, cb) {
+        bitcoin.cmd('getrawtransaction', [txid], function (err, rawTransaction) {
+          if (err) return cb(err)
+          var transaction = decodeRawTransaction(bitcoinjs.Transaction.fromHex(rawTransaction))
+          addColoredIOs(transaction, cb)
+        })
+      }, cb)
+    })
+  }
+
   return {
     parse: parse,
     getAddressesUtxos: getAddressesUtxos,
+    getAddressesTransactions: getAddressesTransactions,
     transmit: transmit
   }  
 }
