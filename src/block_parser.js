@@ -5,6 +5,8 @@ var bitcoinjs = require('bitcoinjs-lib')
 var bufferReverse = require('buffer-reverse')
 var _ = require('lodash')
 var toposort = require('toposort')
+var redisClient = require('redis')
+var bitcoinRpc = require('bitcoin-async')
 
 var mainnetFirstColoredBlock = 364548
 var testnetFirstColoredBlock = 462320
@@ -18,16 +20,25 @@ var blockStates = {
 var label = 'cc-full-node'
 
 module.exports = function (args) {
-
-  var redis = args.redis
-  var bitcoin = args.bitcoin
-  var network = args.network
+  args = args || {}
+  var network = args.network || 'testnet'
   var bitcoinNetwork = (network === 'mainnet') ? bitcoinjs.networks.bitcoin : bitcoinjs.networks.testnet
-  var debug = args.debug
-  
-  if (!debug) {
-    console.log = function () {}
+  var redisOptions = {
+    host: args.redisHost || 'localhost',
+    port: args.redisPort || '6379',
+    prefix: 'ccfullnode:' + network + ':'
   }
+  var redis = redisClient.createClient(redisOptions)
+
+  var bitcoinOptions = {
+    host: args.bitcoinHost || 'localhost',
+    port: args.bitcoinPort || '18332',
+    user: args.bitcoinUser || 'rpcuser',
+    pass: args.bitcoinPass || 'rpcpass',
+    path: args.bitcoinPath || '/',
+    timeout: args.bitcoinTimeout || 30000
+  }
+  var bitcoin = new bitcoinRpc.Client(bitcoinOptions)
 
   var info = {}
 
@@ -506,10 +517,34 @@ module.exports = function (args) {
     })
   }
 
+  var getInfo = function (cb) {
+    bitcoin.cmd('getinfo', [], function (err, btcInfo) {
+      if (err) return cb(err)
+      if (!btcInfo) return cb('No reply from getinfo')
+      btcInfo.timestamp = info.timestamp
+      btcInfo.height = info.height
+      cb(null, btcInfo)
+    })
+  }
+
+  var injectColoredUtxos = function (method, params, ans, cb) {
+    // TODO
+    cb(null, ans)
+  }
+
+  var proxyBitcoinD = function (method, params, cb) {
+    bitcoin.cmd(method, params, function (err, ans) {
+      if (err) return cb(err)
+      injectColoredUtxos(method, params, ans, cb)
+    })
+  }
+
   return {
     parse: parse,
     getAddressesUtxos: getAddressesUtxos,
     getAddressesTransactions: getAddressesTransactions,
-    transmit: transmit
+    transmit: transmit,
+    getInfo: getInfo,
+    proxyBitcoinD: proxyBitcoinD
   }  
 }
