@@ -9,11 +9,9 @@ var path = require('path-extra')
 var ospath = require('ospath')
 
 var propertiesFilePath = path.join(ospath.data(), 'cc_full_node', 'properties.conf')
-// console.log('1', path.join(__dirname ,'/../utils/config'))
-// console.log('2', path.join(__dirname ,'/../src/block_parser.js'))
-// console.log('propertiesFilePath', propertiesFilePath)
 var config = require(path.join(__dirname ,'/../utils/config.js'))(propertiesFilePath)
 var parser = require(path.join(__dirname ,'/../src/block_parser.js'))(config)
+var router = require(path.join(__dirname ,'/../router/router.js'))
 
 var sslCredentials
 if (config.server.usessl && config.server.privateKeyPath && config.server.certificatePath) {
@@ -37,11 +35,6 @@ var launchServer = function (type) {
   })
 }
 
-var handleResponse = function (err, ans, res, next) {
-  if (err) return next(err)
-  res.send(ans)
-}
-
 var app = express()
 app.use(morgan)
 app.use(bodyParser.json())                              // Support for JSON-encoded bodies
@@ -60,36 +53,7 @@ if (config.server.useBasicAuth && config.server.userName && config.server.passwo
   })
 }
 
-app.post('/getAddressesUtxos', function (req, res, next) {
-  var addresses = req.body.addresses
-  if (!addresses) return next('addresses is required')
-  var numOfConfirmations = req.body.numOfConfirmations || 0
-  parser.getAddressesUtxos(addresses, numOfConfirmations, function (err, ans) {
-    handleResponse(err, ans, res, next)
-  })
-})
-
-app.post('/getAddressesTransactions', function (req, res, next) {
-  var addresses = req.body.addresses
-  if (!addresses) return next('addresses is required')
-  parser.getAddressesTransactions(addresses, function (err, ans) {
-    handleResponse(err, ans, res, next)
-  })
-})
-
-app.post('/transmit', function (req, res, next) {
-  var txHex = req.body.txHex
-  if (!txHex) return next('txHex is required')
-  parser.transmit(txHex, function (err, ans) {
-    handleResponse(err, ans, res, next)
-  })
-})
-
-app.get('/getInfo', function (req, res, next) {
-  parser.getInfo(function (err, ans) {
-    handleResponse(err, ans, res, next)
-  })
-})
+router(app, parser)
 
 app.use(function (req, res, next) {
   res.status(404)
@@ -110,18 +74,3 @@ if (sslCredentials) {
 } else {
   launchServer('http')
 }
-
-// parser.getAddressesUtxos(['mxNL1rF87rfBEKtUfQ8YDg2r4crYn6hUDh', 'mhPee3aTfto9f5MLyLwwPu2wD3KoWn85fo'], function (err, utxos) {
-//   if (err) return console.error(err)
-//   console.log('utxos', JSON.stringify(utxos))
-// })
-// parser.getAddressesTransactions(['mxNL1rF87rfBEKtUfQ8YDg2r4crYn6hUDh', 'mhPee3aTfto9f5MLyLwwPu2wD3KoWn85fo'], function (err, transactions) {
-//   if (err) return console.error(err)
-//   console.log('transactions', JSON.stringify(transactions))
-// })
-
-// setTimeout(function () {
-//   parser.getInfo(function (err, info) {
-//     console.log(err, info)
-//   })
-// }, 12000)

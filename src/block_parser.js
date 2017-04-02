@@ -423,11 +423,9 @@ module.exports = function (args) {
     ], finishParsing) 
   }
 
-  var getAddressesUtxos = function (addresses, numOfConfirmations, cb) {
-    if (typeof numOfConfirmations === 'function') {
-      cb = numOfConfirmations
-      numOfConfirmations = 0
-    }
+  var getAddressesUtxos = function (args, cb) {
+    var addresses = args.addresses
+    var numOfConfirmations = args.numOfConfirmations || 0
     bitcoin.cmd('listunspent', [numOfConfirmations, 99999999, addresses], function (err, utxos) {
       if (err) return cb(err)
       async.each(utxos, function (utxo, cb) {
@@ -443,7 +441,8 @@ module.exports = function (args) {
     })
   }
 
-  var transmit = function (txHex, cb) {
+  var transmit = function (args, cb) {
+    var txHex = args.txHex
     bitcoin_rpc.cmd('sendrawtransaction', [txHex], cb)
   }
 
@@ -486,7 +485,8 @@ module.exports = function (args) {
     ], cb)
   }
 
-  var getAddressesTransactions = function (addresses, cb) {
+  var getAddressesTransactions = function (args, cb) {
+    var addresses = args.addresses
     var next = true
     var txids = []
     var skip = 0
@@ -517,7 +517,11 @@ module.exports = function (args) {
     })
   }
 
-  var getInfo = function (cb) {
+  var getInfo = function (args, cb) {
+    if (typeof args === 'function') {
+      cb = args
+      args = null
+    }
     bitcoin.cmd('getinfo', [], function (err, btcInfo) {
       if (err) return cb(err)
       if (!btcInfo) return cb('No reply from getinfo')
