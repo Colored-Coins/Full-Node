@@ -7,6 +7,7 @@ var _ = require('lodash')
 var toposort = require('toposort')
 var redisClient = require('redis')
 var bitcoinRpc = require('bitcoin-async')
+var events = require('events')
 
 var mainnetFirstColoredBlock = 364548
 var testnetFirstColoredBlock = 462320
@@ -39,6 +40,8 @@ module.exports = function (args) {
     timeout: args.bitcoinTimeout || 30000
   }
   var bitcoin = new bitcoinRpc.Client(bitcoinOptions)
+
+  var emitter = new events.EventEmitter()
 
   var info = {}
 
@@ -145,6 +148,7 @@ module.exports = function (args) {
           utxosChanges.unused[transaction.txid + ':' + outputIndex] = JSON.stringify(assets)
         }
       })
+      emitter.emit('newcctransaction', transaction)
       cb()
     })
   }
@@ -251,12 +255,20 @@ module.exports = function (args) {
     async.eachSeries(block.transactions, function (transaction, cb) {
       utxosChanges.txids.push(transaction.txid)
       var coloredData = getColoredData(transaction)
-      if (!coloredData) return process.nextTick(cb)
+      if (!coloredData) {
+        emitter.emit('newtransaction', transaction)
+        return process.nextTick(cb)
+      }
       transaction.ccdata = [coloredData]
       parseTransaction(transaction, utxosChanges, block.height, cb)
     }, function (err) {
       if (err) return cb(err)
-      updateUtxosChanges(block, utxosChanges, cb)
+      updateUtxosChanges(block, utxosChanges, function (err) {
+        if (err) return cb(err)
+        block.transactions = block.transactions.map(transaction => transaction.txid)
+        emitter.emit('newblock', block)
+        cb()
+      })
     })
   }
 
@@ -317,6 +329,7 @@ module.exports = function (args) {
       var coloredData = getColoredData(newMempoolTransaction)
       if (!coloredData) {
         nonColoredTxids.push(newMempoolTransaction.txid)
+        emitter.emit('newtransaction', newMempoolTransaction)
         return process.nextTick(cb)
       }
       newMempoolTransaction.ccdata = [coloredData]
@@ -354,7 +367,7 @@ module.exports = function (args) {
 
   var finishParsing = function (err)  {
     if (err) console.error(err)
-    parse()
+    parseProcedure()
   }
 
   var importAddresses = function (addresses, cb) {
@@ -406,16 +419,18 @@ module.exports = function (args) {
       progressCallback = addresses
       addresses = null
     }
+    setInterval(function () { 
+      emitter.emit('info', info)
+      if (progressCallback) {
+        progressCallback(info) 
+      }
+    }, 5000);
+    if (!addresses || !Array.isArray(addresses)) return parseProcedure()
+    importAddresses(addresses, parseProcedure)
+  }
 
-    if (progressCallback) {
-      setInterval(function () { progressCallback(info) }, 5000);
-    }
-
+  var parseProcedure = function () {
     async.waterfall([
-      function (cb) {
-        if (!addresses || !Array.isArray(addresses)) return process.nextTick(cb)
-        importAddresses(addresses, cb)
-      },
       getNextBlockHeight,
       getNextBlock,
       checkNextBlock,
@@ -549,6 +564,7 @@ module.exports = function (args) {
     getAddressesTransactions: getAddressesTransactions,
     transmit: transmit,
     getInfo: getInfo,
-    proxyBitcoinD: proxyBitcoinD
+    proxyBitcoinD: proxyBitcoinD,
+    emitter: emitter
   }  
 }

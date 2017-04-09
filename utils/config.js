@@ -13,6 +13,8 @@ module.exports = function (propertiesFile) {
 
   properties.redisHost = properties.redisHost || process.env.REDIS_HOST || 'localhost'
   properties.redisPort = properties.redisPort || process.env.REDIS_PORT || '6379'
+  properties.redisPassword = properties.redisPassword || process.env.REDIS_PASSWORD
+
   properties.network = properties.network || process.env.NETWORK || 'testnet'
   properties.bitcoinHost = properties.bitcoinHost || process.env.BITCOIND_HOST || 'localhost'
   properties.bitcoinPort = properties.bitcoinPort || process.env.BITCOIND_PORT || '18332'

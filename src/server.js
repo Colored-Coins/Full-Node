@@ -7,11 +7,13 @@ var morgan = require('morgan')('dev')
 var auth = require('basic-auth')
 var path = require('path-extra')
 var ospath = require('ospath')
+var socketio = require('socket.io')
 
 var propertiesFilePath = path.join(ospath.data(), 'cc_full_node', 'properties.conf')
 var config = require(path.join(__dirname ,'/../utils/config.js'))(propertiesFilePath)
 var parser = require(path.join(__dirname ,'/../src/block_parser.js'))(config)
 var router = require(path.join(__dirname ,'/../router/router.js'))
+var sockets = require(path.join(__dirname ,'/../utils/sockets.js'))
 
 var sslCredentials
 if (config.server.usessl && config.server.privateKeyPath && config.server.certificatePath) {
@@ -25,6 +27,13 @@ if (config.server.usessl && config.server.privateKeyPath && config.server.certif
 var launchServer = function (type) {
   var server = (type === 'https') ? https.createServer(sslCredentials, app) : http.createServer(app)
   var port = (type === 'https') ? config.server.httpsPort : config.server.httpPort
+  var io = socketio(server)
+
+  sockets({
+    io: io,
+    emitter: parser.emitter
+  })
+
   server.listen(port, config.server.host, function () {
     console.log(type + ' server started on port', port)
     app.emit('connect', type)
