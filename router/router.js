@@ -26,6 +26,13 @@ var routes = [
     functionName: 'getInfo',
     params: [],
     optionalParams: []
+  },
+  {
+    path: '/importAddresses',
+    method: 'post',
+    functionName: 'importAddresses',
+    params: ['addresses'],
+    optionalParams: ['reindex']
   }
 ]
 

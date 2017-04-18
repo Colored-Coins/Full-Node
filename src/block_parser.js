@@ -43,7 +43,25 @@ module.exports = function (args) {
 
   var emitter = new events.EventEmitter()
 
-  var info = {}
+  var info = {
+    bitcoindbusy: true
+  }
+
+  var waitForBitcoind = function (cb) {
+    if (!info.bitcoindbusy) return cb()
+    return setTimeout(function() { 
+      console.log('Waiting for bitcoind...')
+      bitcoin.cmd('getinfo', [], function (err) {
+        if (err) {
+          info.error = err
+          return waitForBitcoind(cb)
+        }
+        delete info.error
+        info.bitcoindbusy = false
+        cb()
+      })
+    }, 5000)
+  }
 
   var getNextBlockHeight = function (cb) {
     redis.hget('blocks', 'lastBlockHeight', function (err, lastBlockHeight) {
@@ -245,8 +263,8 @@ module.exports = function (args) {
   }
 
   var parseNewBlock = function (block, cb) {
-    info.timestamp = block.timestamp
-    info.height = block.height
+    info.cctimestamp = block.timestamp
+    info.ccheight = block.height
     var utxosChanges = {
       used: {},
       unused: {},
@@ -344,12 +362,14 @@ module.exports = function (args) {
   }
 
   var updateInfo = function (cb) {
-    if (info.height && info.timestamp) return process.nextTick(cb)
+    if (info.ccheight && info.cctimestamp) {
+      return process.nextTick(cb)
+    }
     redis.hmget('blocks', 'lastBlockHeight', 'lastTimestamp', function (err, arr) {
       if (err) return cb(err)
       if (!arr || arr.length < 2) return process.nextTick(cb)
-      info.height = arr[0]
-      info.timestamp = arr[1]
+      info.ccheight = arr[0]
+      info.cctimestamp = arr[1]
       cb()
     })
   }
@@ -370,9 +390,22 @@ module.exports = function (args) {
     parseProcedure()
   }
 
-  var importAddresses = function (addresses, cb) {
+  var importAddresses = function (args, cb) {
+    var addresses = args.addresses
+    var reindex = !!args.reindex
     var newAddresses
     var importedAddresses
+    var ended = false
+
+    var endFunc = function () {
+      if (!ended) {
+        ended = true
+        return cb(null, {
+          addresses: addresses,
+          reindex: reindex,
+        })
+      }
+    }
     async.waterfall([
       function (cb) {
         redis.hget('addresses', 'imported', cb)
@@ -381,8 +414,8 @@ module.exports = function (args) {
         importedAddresses = _importedAddresses || '[]'
         importedAddresses = JSON.parse(importedAddresses)
         newAddresses = _.difference(addresses, importedAddresses)
-        if (newAddresses.length < 2) return process.nextTick(cb)
-        var commandsArr = newAddresses.splice(0, newAddresses.length - 1).map(function (address) {
+        if (reindex && newAddresses.length < 2 || !newAddresses.length) return process.nextTick(cb)
+        var commandsArr = newAddresses.splice(0, newAddresses.length - (reindex ? 1 : 0)).map(function (address) {
           return {
             method: 'importaddress',
             params: [address, label, false]
@@ -391,17 +424,14 @@ module.exports = function (args) {
         bitcoin.cmd(commandsArr, function (ans, cb) { return process.nextTick(cb)}, cb)
       },
       function (cb) {
+        reindex = false
         if (!newAddresses.length) return process.nextTick(cb)
-        var waitForBitcoinReparse = function (err) {
-          if (err) {
-            return setTimeout(function() { 
-              console.log('Waiting for bitcoin to finnish reparsing...')
-              bitcoin.cmd('getinfo', [], waitForBitcoinReparse)
-            }, 1000)
-          }
-          cb()
-        }
-        bitcoin.cmd('importaddress', [newAddresses[0], label, true], waitForBitcoinReparse)
+        reindex = true
+        info.bitcoindbusy = true
+        bitcoin.cmd('importaddress', [newAddresses[0], label, true], function (err) {
+          waitForBitcoind(cb)
+        })
+        endFunc()
       },
       function (cb) {
         newAddresses = _.difference(addresses, importedAddresses)
@@ -411,7 +441,10 @@ module.exports = function (args) {
           cb(err)
         })
       }
-    ] ,cb)
+    ], function (err) {
+      if (err) return cb(err)
+      endFunc()
+    })
   }
 
   var parse = function (addresses, progressCallback) {
@@ -426,11 +459,21 @@ module.exports = function (args) {
       }
     }, 5000);
     if (!addresses || !Array.isArray(addresses)) return parseProcedure()
-    importAddresses(addresses, parseProcedure)
+    importAddresses({addresses: addresses, reindex: true}, parseProcedure)
+  }
+
+  var infoPopulate = function (cb) {
+    getBitcoindInfo(function (err, newInfo) {
+      if (err) return cb(err)
+      info = newInfo
+      cb()
+    })
   }
 
   var parseProcedure = function () {
     async.waterfall([
+      waitForBitcoind,
+      infoPopulate,
       getNextBlockHeight,
       getNextBlock,
       checkNextBlock,
@@ -532,18 +575,22 @@ module.exports = function (args) {
     })
   }
 
+  var getBitcoindInfo = function (cb) {
+    bitcoin.cmd('getinfo', [], function (err, btcInfo) {
+      if (err) return cb(err)
+      if (!btcInfo) return cb('No reply from getinfo')
+      btcInfo.cctimestamp = info.cctimestamp
+      btcInfo.ccheight = info.ccheight
+      cb(null, btcInfo)
+    })
+  }
+
   var getInfo = function (args, cb) {
     if (typeof args === 'function') {
       cb = args
       args = null
     }
-    bitcoin.cmd('getinfo', [], function (err, btcInfo) {
-      if (err) return cb(err)
-      if (!btcInfo) return cb('No reply from getinfo')
-      btcInfo.timestamp = info.timestamp
-      btcInfo.height = info.height
-      cb(null, btcInfo)
-    })
+    cb(null, info)
   }
 
   var injectColoredUtxos = function (method, params, ans, cb) {
@@ -560,6 +607,7 @@ module.exports = function (args) {
 
   return {
     parse: parse,
+    importAddresses: importAddresses,
     getAddressesUtxos: getAddressesUtxos,
     getAddressesTransactions: getAddressesTransactions,
     transmit: transmit,
