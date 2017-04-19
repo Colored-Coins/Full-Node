@@ -2,7 +2,7 @@ var ini = require('iniparser')
 var _ = require('lodash')
 var path = require('path-extra')
 var ospath = require('ospath')
-var exec = require('child_process').execFile
+var cp = require('child_process')
 
 var tryPopulateBitcoinConfAuto = function (properties) {
   var bitcoindConfPath = path.join(ospath.data(), 'Bitcoin', 'bitcoin.conf')
@@ -31,7 +31,7 @@ var tryRunBitcoindWin32 = function (properties) {
   if (properties.network === 'testnet') {
     args.push('--testnet')
   }
-  var spawn = require('child_process').spawn
+  var spawn = cp.spawn
   var bitcoind = spawn(command, args, {cwd: cwd})
 
 
@@ -47,7 +47,7 @@ var tryRunBitcoindWin32 = function (properties) {
     console.error('bitcoind closed with code,', code)
   })
 
-  bitcoind.on('error', function (code, data) {
+  bitcoind.on('error', function (code) {
     console.log('bitcoind exited with error code,', code)
   })
 }
@@ -56,6 +56,42 @@ var tryRunBitcoind = function (properties) {
   switch (this.__platform || process.platform) {
     case 'win32': 
       return tryRunBitcoindWin32(properties)
+    case 'darwin': 
+      return false
+    default: 
+      return false
+  }
+}
+
+var tryRunRedisWin32 = function (properties) {
+  var command = 'net'
+  var args = ['start', 'redis']
+  var spawn = cp.spawn
+  var redis = spawn(command, args)
+
+
+  redis.stdout.on('data', function (data) {
+    console.log('redis:', data.toString())
+  })
+
+  redis.stderr.on('data', function (data) {
+    console.error('redis error:', data.toString())
+  })
+
+  redis.on('close', function (code) {
+    if (code == 0 || code == 2) return
+    console.error('redis closed with code,', code)
+  })
+
+  redis.on('error', function (code) {
+    console.log('redis exited with error code,', code)
+  })
+}
+
+var tryRunRedis = function (properties) {
+  switch (this.__platform || process.platform) {
+    case 'win32': 
+      return tryRunRedisWin32(properties)
     case 'darwin': 
       return false
     default: 
@@ -77,14 +113,14 @@ module.exports = function (propertiesFile) {
   properties.redisPort = properties.redisPort || process.env.REDIS_PORT || '6379'
   properties.redisPassword = properties.redisPassword || process.env.REDIS_PASSWORD
 
-  properties.bitcoinAutoConf = (properties.bitcoinAutoConf || process.env.BITCOIND_AUTO_CONF === 'true')
+  properties.bitcoindAutoConf = (properties.bitcoindAutoConf || process.env.BITCOIND_AUTO_CONF === 'true')
 
-  var bitcoinAutoConf = false
-  if (properties.bitcoinAutoConf) {
-    bitcoinAutoConf = tryPopulateBitcoinConfAuto(properties)
+  var bitcoindAutoConf = false
+  if (properties.bitcoindAutoConf) {
+    bitcoindAutoConf = tryPopulateBitcoinConfAuto(properties)
   }
 
-  if (!bitcoinAutoConf) {
+  if (!bitcoindAutoConf) {
     properties.network = properties.network || process.env.NETWORK || 'testnet'
     properties.bitcoinHost = properties.bitcoinHost || process.env.BITCOIND_HOST || 'localhost'
     properties.bitcoinPort = properties.bitcoinPort || process.env.BITCOIND_PORT || '18332'
@@ -94,10 +130,15 @@ module.exports = function (propertiesFile) {
     properties.bitcoinTimeout = parseInt(properties.bitcoinTimeout || process.env.BITCOIND_TIMEOUT || 30000, 10)
   }
 
-  properties.bitcoinAutoRun = (properties.bitcoinAutoRun || process.env.BITCOIND_AUTO_RUN === 'true')
+  properties.bitcoindAutoRun = (properties.bitcoindAutoRun || process.env.BITCOIND_AUTO_RUN === 'true')
 
-  if (properties.bitcoinAutoRun) {
+  if (properties.bitcoindAutoRun) {
     tryRunBitcoind(properties)
+  }
+  properties.redisAutoRun = (properties.redisAutoRun || process.env.BITCOIND_AUTO_RUN === 'true')
+
+  if (properties.redisAutoRun) {
+    tryRunRedis(properties)
   }
 
   properties.server = properties.server || {}
