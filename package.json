@@ -22,7 +22,7 @@
     "async": "^2.1.4",
     "basic-auth": "^1.1.0",
     "bitcoin-async": "^1.0.0",
-    "bitcoinjs-lib": "git://github.com/bitcoinjs/bitcoinjs-lib.git#b590d3406c8ff02e59cbb483fb071e7ee8094129",
+    "bitcoinjs-lib": "3.0.2",
     "body-parser": "^1.17.1",
     "cc-get-assets-outputs": "^1.2.0",
     "cc-transaction": "^1.2.0",
