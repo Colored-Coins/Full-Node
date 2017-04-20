@@ -53,7 +53,16 @@ module.exports = function (args) {
       console.log('Waiting for bitcoind...')
       bitcoin.cmd('getinfo', [], function (err) {
         if (err) {
-          info.error = err
+          info.error = {}
+          if (err.code) {
+            info.error.code = err.code
+          }
+          if (err.message) {
+            info.error.message = err.message
+          }
+          if (!err.code && !err.message) {
+            info.error = err
+          }
           return waitForBitcoind(cb)
         }
         delete info.error

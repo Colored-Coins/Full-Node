@@ -52,12 +52,40 @@ var tryRunBitcoindWin32 = function (properties) {
   })
 }
 
+var tryRunBitcoindMac = function (properties) {
+  var command = 'bitcoind'
+  var args = ['--server', '--txindex']
+  if (properties.network === 'testnet') {
+    args.push('--testnet')
+  }
+  var spawn = cp.spawn
+  var bitcoind = spawn(command, args)
+
+
+  bitcoind.stdout.on('data', function (data) {
+    console.log('bitcoind:', data.toString())
+  })
+
+  bitcoind.stderr.on('data', function (data) {
+    console.error('bitcoind error:', data.toString())
+  })
+
+  bitcoind.on('close', function (code) {
+    if (code == 0) return
+    console.error('bitcoind closed with code,', code)
+  })
+
+  bitcoind.on('error', function (code) {
+    console.log('bitcoind exited with error code,', code)
+  })
+}
+
 var tryRunBitcoind = function (properties) {
   switch (this.__platform || process.platform) {
     case 'win32': 
       return tryRunBitcoindWin32(properties)
     case 'darwin': 
-      return false
+      return tryRunBitcoindMac(properties)
     default: 
       return false
   }
@@ -88,12 +116,36 @@ var tryRunRedisWin32 = function (properties) {
   })
 }
 
+var tryRunRedisMac = function (properties) {
+  var command = 'redis-server'
+  var spawn = cp.spawn
+  var redis = spawn(command)
+
+
+  redis.stdout.on('data', function (data) {
+    console.log('redis:', data.toString())
+  })
+
+  redis.stderr.on('data', function (data) {
+    console.error('redis error:', data.toString())
+  })
+
+  redis.on('close', function (code) {
+    if (code == 0 || code == 2) return
+    console.error('redis closed with code,', code)
+  })
+
+  redis.on('error', function (code) {
+    console.log('redis exited with error code,', code)
+  })
+}
+
 var tryRunRedis = function (properties) {
   switch (this.__platform || process.platform) {
     case 'win32': 
       return tryRunRedisWin32(properties)
     case 'darwin': 
-      return false
+      return tryRunRedisMac(properties)
     default: 
       return false
   }
