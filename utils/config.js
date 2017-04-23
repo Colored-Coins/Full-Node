@@ -5,7 +5,7 @@ var ospath = require('ospath')
 var cp = require('child_process')
 
 var tryPopulateBitcoinConfAuto = function (properties) {
-  var bitcoindConfPath = path.join(ospath.data(), 'Bitcoin', 'bitcoin.conf')
+  var bitcoindConfPath = process.platform === 'linux' ? path.join(ospath.home(), '.bitcoin', 'bitcoin.conf') : path.join(ospath.data(), 'Bitcoin', 'bitcoin.conf')
   var bitcoindProperties
   try {
     bitcoindProperties = ini.parseSync(bitcoindConfPath)
@@ -14,7 +14,7 @@ var tryPopulateBitcoinConfAuto = function (properties) {
     return false
   }
   if (!bitcoindProperties) return false
-  console.log('bitcoindProperties', bitcoindProperties)
+  // console.log('bitcoindProperties', bitcoindProperties)
   // properties.network = (bitcoindProperties.testnet === '1' || bitcoindProperties === 'true') ? 'testnet' : 'mainnet'
   properties.bitcoinHost = 'localhost'
   properties.bitcoinPort = bitcoindProperties.rpcport || (properties.network === 'testnet' ? '18332' : '8332')
@@ -34,25 +34,29 @@ var tryRunBitcoindWin32 = function (properties) {
   var spawn = cp.spawn
   var bitcoind = spawn(command, args, {cwd: cwd})
 
-
-  bitcoind.stdout.on('data', function (data) {
-    console.log('bitcoind:', data.toString())
-  })
+  // bitcoind.stdout.on('data', function (data) {
+  //   console.log('bitcoind:', data.toString())
+  // })
 
   bitcoind.stderr.on('data', function (data) {
     console.error('bitcoind error:', data.toString())
   })
 
   bitcoind.on('close', function (code) {
+    if (code == 0 || code == 2) return
     console.error('bitcoind closed with code,', code)
   })
 
   bitcoind.on('error', function (code) {
-    console.log('bitcoind exited with error code,', code)
+    if (code == 0 || code == 2) return
+    console.error('bitcoind exited with error code,', code)
   })
+
+  return true
 }
 
-var tryRunBitcoindMac = function (properties) {
+var tryRunBitcoindMac, tryRunBitcoindLinux
+tryRunBitcoindMac = tryRunBitcoindLinux = function (properties) {
   var command = 'bitcoind'
   var args = ['--server', '--txindex']
   if (properties.network === 'testnet') {
@@ -61,23 +65,25 @@ var tryRunBitcoindMac = function (properties) {
   var spawn = cp.spawn
   var bitcoind = spawn(command, args)
 
-
-  bitcoind.stdout.on('data', function (data) {
-    console.log('bitcoind:', data.toString())
-  })
+  // bitcoind.stdout.on('data', function (data) {
+  //   console.log('bitcoind:', data.toString())
+  // })
 
   bitcoind.stderr.on('data', function (data) {
     console.error('bitcoind error:', data.toString())
   })
 
   bitcoind.on('close', function (code) {
-    if (code == 0) return
+    if (code == 0 || code == 2) return
     console.error('bitcoind closed with code,', code)
   })
 
   bitcoind.on('error', function (code) {
-    console.log('bitcoind exited with error code,', code)
+    if (code == 0 || code == 2) return
+    console.error('bitcoind exited with error code,', code)
   })
+
+  return true
 }
 
 var tryRunBitcoind = function (properties) {
@@ -87,7 +93,7 @@ var tryRunBitcoind = function (properties) {
     case 'darwin': 
       return tryRunBitcoindMac(properties)
     default: 
-      return false
+      return tryRunBitcoindLinux(properties)
   }
 }
 
@@ -97,10 +103,9 @@ var tryRunRedisWin32 = function (properties) {
   var spawn = cp.spawn
   var redis = spawn(command, args)
 
-
-  redis.stdout.on('data', function (data) {
-    console.log('redis:', data.toString())
-  })
+  // redis.stdout.on('data', function (data) {
+  //   console.log('redis:', data.toString())
+  // })
 
   redis.stderr.on('data', function (data) {
     console.error('redis error:', data.toString())
@@ -112,19 +117,19 @@ var tryRunRedisWin32 = function (properties) {
   })
 
   redis.on('error', function (code) {
-    console.log('redis exited with error code,', code)
+    console.error('redis exited with error code,', code)
   })
 }
 
-var tryRunRedisMac = function (properties) {
+var tryRunRedisMac, tryRunRedisLinux
+tryRunRedisMac = tryRunRedisLinux = function (properties) {
   var command = 'redis-server'
   var spawn = cp.spawn
   var redis = spawn(command)
 
-
-  redis.stdout.on('data', function (data) {
-    console.log('redis:', data.toString())
-  })
+  // redis.stdout.on('data', function (data) {
+  //   console.log('redis:', data.toString())
+  // })
 
   redis.stderr.on('data', function (data) {
     console.error('redis error:', data.toString())
@@ -136,7 +141,8 @@ var tryRunRedisMac = function (properties) {
   })
 
   redis.on('error', function (code) {
-    console.log('redis exited with error code,', code)
+    if (code == 0 || code == 2) return
+    console.error('redis exited with error code,', code)
   })
 }
 
@@ -147,17 +153,26 @@ var tryRunRedis = function (properties) {
     case 'darwin': 
       return tryRunRedisMac(properties)
     default: 
-      return false
+      return tryRunRedisLinux(properties)
   }
 }
 
 module.exports = function (propertiesFile) {
+  var localPropertiesFile = path.join(__dirname ,'/../properties.conf')
+  propertiesFile = propertiesFile || localPropertiesFile
   var properties = {}
-  if (propertiesFile) {
-    try {
-      properties = ini.parseSync(propertiesFile)
-    } catch (e) { 
-      console.warn('Can\'t find properties file:', propertiesFile)
+  try {
+    properties = ini.parseSync(propertiesFile)
+  } catch (e) {
+    console.warn('Can\'t find properties file:', propertiesFile)
+    if (propertiesFile !== localPropertiesFile) {
+      console.warn('Trying local properties file...')
+      try {
+        properties = ini.parseSync(localPropertiesFile)
+      }
+      catch (e) {
+        console.warn('Can\'t find local properties file:', localPropertiesFile)
+      }
     }
   }
 
