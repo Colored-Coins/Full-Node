@@ -25,7 +25,7 @@ var tryPopulateBitcoinConfAuto = function (properties) {
 }
 
 var tryRunBitcoindWin32 = function (properties) {
-  var cwd = 'C:\\Program Files\\Bitcoin\\daemon\\'
+  var cwd = properties.bitcoindExecutableDir || process.env.BITCOIND_EXECUTABLE_DIR || 'C:\\Program Files\\Bitcoin\\daemon\\'
   var command = 'bitcoind.exe'
   var args = ['--server', '--txindex']
   if (properties.network === 'testnet') {
@@ -104,10 +104,11 @@ var tryRunBitcoind = function (properties) {
 }
 
 var tryRunRedisWin32 = function (properties) {
-  var command = 'net'
-  var args = ['start', 'redis']
+  var cwd = properties.redisExecutableDir || process.env.REDIS_EXECUTABLE_DIR || 'C:\\Program Files\\Redis'
+  var command = 'redis-server.exe'
+  var args = []
   var spawn = cp.spawn
-  var redis = spawn(command, args)
+  var redis = spawn(command, args, {cwd: cwd})
 
   // redis.stdout.on('data', function (data) {
   //   console.log('redis:', data.toString())
