@@ -31,6 +31,12 @@ var tryRunBitcoindWin32 = function (properties) {
   if (properties.network === 'testnet') {
     args.push('--testnet')
   }
+  if (properties.bitcoindAutoConf && !properties.bitcoindAutoConfSuccess) {
+    // could not pull bitcoin properties (bitcoin.conf) to self properties - run bitcoin RPC server with defaults
+    args.push('-rpcuser=' + properties.bitcoinUser)
+    args.push('-rpcpassword=' + properties.bitcoinPass)
+    args.push('-rpcport=' + properties.bitcoinPort)
+  }
   var spawn = cp.spawn
   var bitcoind = spawn(command, args, {cwd: cwd})
 
@@ -182,12 +188,12 @@ module.exports = function (propertiesFile) {
 
   properties.bitcoindAutoConf = (properties.bitcoindAutoConf || process.env.BITCOIND_AUTO_CONF === 'true')
 
-  var bitcoindAutoConf = false
+  var bitcoindAutoConfSuccess = false
   if (properties.bitcoindAutoConf) {
-    bitcoindAutoConf = tryPopulateBitcoinConfAuto(properties)
+    bitcoindAutoConfSuccess = tryPopulateBitcoinConfAuto(properties)
   }
 
-  if (!bitcoindAutoConf) {
+  if (!bitcoindAutoConfSuccess) {
     properties.network = properties.network || process.env.NETWORK || 'testnet'
     properties.bitcoinHost = properties.bitcoinHost || process.env.BITCOIND_HOST || 'localhost'
     properties.bitcoinPort = properties.bitcoinPort || process.env.BITCOIND_PORT || '18332'
@@ -209,7 +215,7 @@ module.exports = function (propertiesFile) {
   }
 
   properties.server = properties.server || {}
-  properties.server.httpPort = properties.server.httpPort || process.env.CCFULLNODE_HTTP_PORT || process.env.PORT || 80 // Optional
+  properties.server.httpPort = properties.server.httpPort || process.env.CCFULLNODE_HTTP_PORT || process.env.PORT || 8043 // Optional
   properties.server.httpsPort = properties.server.httpsPort || process.env.CCFULLNODE_HTTPS_PORT || 443 // Optional
   properties.server.host = properties.server.host || process.env.CCFULLNODE_HOST || '0.0.0.0' // Optional
 
