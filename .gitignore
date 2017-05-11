@@ -38,5 +38,8 @@ jspm_packages
 ssl/
 *.rdb
 
-# distribution folder, the compiled files
+# Distribution folder, the compiled files
 dist
+
+# External dependencies
+dependencies
