@@ -1,14 +1,15 @@
 {
-  "name": "cc_full_node",
-  "ProductName": "Colored Coins Full Node",
-  "version": "1.0.0",
-  "description": "Colored coins full node",
+  "name": "coloredcoins-full-node",
+  "ProductName": "ColoredCoins Full Node",
+  "version": "0.1.0",
+  "description": "ColoredCoins Full Node",
   "main": "src/server.js",
   "scripts": {
-    "start": "node ./server/server.js",
-    "package-mac": "electron-packager . --overwrite --platform=darwin --arch=x64 --prune=true --out=release-builds",
-    "package-win": "electron-packager . --overwrite --asar=true --platform=win32 --arch=ia32 --prune=true --out=release-builds --version-string.CompanyName=Colu --version-string.FileDescription=cc_full_node --version-string.ProductName=\"Colored Coins Full Node\"",
-    "package-linux": "electron-packager . --overwrite --platform=linux --arch=x64 --prune=true --out=release-builds"
+    "start": "node ./src/server.js",
+    "package-mac": "electron-packager . --overwrite --platform=darwin --arch=x64 --icon=assets/coloredcoins.icns --prune=true --ignore=dependencies --ignore=dist --out=dist",
+    "package-win": "electron-packager . --overwrite --asar=true --platform=win32 --arch=ia32 --icon=assets/coloredcoins.ico --prune=true --ignore=dependencies --ignore=dist --out=dist --version-string.CompanyName=ColoredCoins.org --version-string.FileDescription=coloredcoins-full-node --version-string.ProductName=\"ColoredCoins Full Node\"",
+    "package-winstaller": "node ./installer-scripts/package-winstaller.js",
+    "package-linux": "electron-packager . --overwrite --platform=linux --arch=x64 --icon=assets/coloredcoins.png --prune=true --ignore=dependencies --ignore=dist --out=dist"
   },
   "keywords": [
     "Colored",
@@ -39,6 +40,8 @@
   },
   "devDependencies": {
     "electron": "^1.6.2",
-    "electron-packager": "^8.6.0"
+    "electron-packager": "^8.6.0",
+    "innosetup-compiler": "^5.5.9",
+    "yargs": "^8.0.1"
   }
 }
