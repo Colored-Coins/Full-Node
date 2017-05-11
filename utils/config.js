@@ -68,6 +68,12 @@ tryRunBitcoindMac = tryRunBitcoindLinux = function (properties) {
   if (properties.network === 'testnet') {
     args.push('--testnet')
   }
+  if (properties.bitcoindAutoConf && !properties.bitcoindAutoConfSuccess) {
+    // could not pull bitcoin properties (bitcoin.conf) to self properties - run bitcoin RPC server with defaults
+    args.push('-rpcuser=' + properties.bitcoinUser)
+    args.push('-rpcpassword=' + properties.bitcoinPass)
+    args.push('-rpcport=' + properties.bitcoinPort)
+  }
   var spawn = cp.spawn
   var bitcoind = spawn(command, args)
 
