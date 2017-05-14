@@ -49,7 +49,7 @@ module.exports = function (args) {
 
   var waitForBitcoind = function (cb) {
     if (!info.bitcoindbusy) return cb()
-    return setTimeout(function() { 
+    return setTimeout(function() {
       console.log('Waiting for bitcoind...')
       bitcoin.cmd('getinfo', [], function (err) {
         if (err) {
@@ -239,6 +239,7 @@ module.exports = function (args) {
     r['txid'] = tx.getId()
     r['version'] = tx.version
     r['locktime'] = tx.lock_time
+    r['hex'] = tx.toHex()
     r['vin'] = []
     r['vout'] = []
 
@@ -263,11 +264,18 @@ module.exports = function (args) {
         var addresses = []
         if (~['pubkeyhash', 'scripthash'].indexOf(type)) {
           addresses.push(bitcoinjs.address.fromOutputScript(bitcoinjs.script.decompile(txout.script), bitcoinNetwork))
-        } 
+        }
         var answer = {'value' : value, 'n': i, 'scriptPubKey': {'asm': asm, 'hex': hex, 'addresses': addresses, 'type': type}}
 
         r['vout'].push(answer)
     })
+
+    var ccdata = getColoredData(r)
+    if (ccdata) {
+      r['ccdata'] = [ccdata]
+      r['colored'] = true
+    }
+    r['fee'] = r['vin'].reduce(function(a, b) { return a + b }, 0) - r['vout'].reduce(function(a, b) { return a + b }, 0)
     return r
   }
 
@@ -330,7 +338,7 @@ module.exports = function (args) {
 
   var orderByDependencies = function (transactions) {
     var txids = {}
-    transactions.forEach(function (transaction) { 
+    transactions.forEach(function (transaction) {
       txids[transaction.txid] = transaction
     })
     var edges = []
@@ -461,10 +469,10 @@ module.exports = function (args) {
       progressCallback = addresses
       addresses = null
     }
-    setInterval(function () { 
+    setInterval(function () {
       emitter.emit('info', info)
       if (progressCallback) {
-        progressCallback(info) 
+        progressCallback(info)
       }
     }, 5000);
     if (!addresses || !Array.isArray(addresses)) return parseProcedure()
@@ -487,7 +495,7 @@ module.exports = function (args) {
       getNextBlock,
       checkNextBlock,
       conditionalParseNextBlock
-    ], finishParsing) 
+    ], finishParsing)
   }
 
   var getAddressesUtxos = function (args, cb) {
@@ -510,7 +518,13 @@ module.exports = function (args) {
 
   var transmit = function (args, cb) {
     var txHex = args.txHex
-    bitcoin_rpc.cmd('sendrawtransaction', [txHex], cb)
+    bitcoin.cmd('sendrawtransaction', [txHex], function(err, res) {
+      if (err) {
+        return cb(err)
+      } else {
+        return cb(err, '{ "txid": "' +  res + '" }')
+      }
+    })
   }
 
   var addColoredInputs = function (transaction, cb) {
@@ -558,6 +572,7 @@ module.exports = function (args) {
     var txids = []
     var skip = 0
     var count = 10
+    var transactions = []
     async.whilst(function () { return next }, function (cb) {
       bitcoin.cmd('listtransactions', [label, count, skip, true], function (err, transactions) {
         if (err) return cb(err)
@@ -574,13 +589,45 @@ module.exports = function (args) {
       })
     }, function (err) {
       if (err) return cb(err)
-      async.map(txids, function (txid, cb) {
+      var q = async.queue(function(txid, cb) {
         bitcoin.cmd('getrawtransaction', [txid], function (err, rawTransaction) {
           if (err) return cb(err)
           var transaction = decodeRawTransaction(bitcoinjs.Transaction.fromHex(rawTransaction))
-          addColoredIOs(transaction, cb)
+          addColoredIOs(transaction, function(err) {
+            if (err) return cb(err)
+            transactions.push(transaction)
+            cb()
+          })
         })
-      }, cb)
+      }, 5)
+
+      q.drain = function() {
+        var prevOutsQueue = async.queue(function(i, cb) {
+          var txid = transactions[i].vin[0].txid
+          var vout = transactions[i].vin[0].vout
+          bitcoin.cmd('getrawtransaction', [txid], function (err, rawTransaction) {
+            if (err) return cb(err)
+            var transaction = decodeRawTransaction(bitcoinjs.Transaction.fromHex(rawTransaction))
+            transactions[i].vin[0].previousOutput = transaction.vout[vout]
+            if (transactions[i].vin[0].previousOutput.scriptPubKey && transactions[i].vin[0].previousOutput.scriptPubKey.addresses) {
+              transactions[i].vin[0].previousOutput.addresses = transactions[i].vin[0].previousOutput.scriptPubKey.addresses
+            }
+            cb()
+          })
+        }, 5)
+
+
+        prevOutsQueue.drain = function() {
+          cb(null, transactions)
+        }
+        prevOutsQueue.push(transactions.filter(function(tx) {
+          return tx.colored && tx.ccdata && tx.ccdata.length && tx.ccdata[0].type === 'issuance'
+        }).map(function(tx, i) {
+          return i
+        }))
+      }
+
+      q.push(txids)
     })
   }
 
@@ -623,5 +670,5 @@ module.exports = function (args) {
     getInfo: getInfo,
     proxyBitcoinD: proxyBitcoinD,
     emitter: emitter
-  }  
+  }
 }
