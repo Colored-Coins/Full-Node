@@ -1,6 +1,4 @@
-# Colored Coins Full-Node
-
-## *This is a work in progress module!*
+# ColoredCoins Full-Node
 
 * This module, coupled with [bitcoin-core](https://bitcoin.org) reference client, will add the colored layer to bitcoin transactions and their inputs \ outputs.
 * It will expose the same api as the reference client with an addition of `assets` array on each transaction input \ output.
