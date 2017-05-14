@@ -17,6 +17,11 @@
     "full",
     "node"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Colored-Coins/Full-Node.git"
+  },
+  "license": "Apache-2.0",
   "author": "Tal Beja",
   "license": "ISC",
   "dependencies": {
