@@ -581,6 +581,7 @@ module.exports = function (args) {
     var skip = 0
     var count = 10
     var transactions = {}
+    
     async.whilst(function () { return next }, function (cb) {
       bitcoin.cmd('listtransactions', [label, count, skip, true], function (err, transactions) {
         if (err) return cb(err)

@@ -37,3 +37,9 @@ jspm_packages
 .node_repl_history
 ssl/
 *.rdb
+
+# Distribution folder, the compiled files
+dist
+
+# External dependencies
+dependencies
