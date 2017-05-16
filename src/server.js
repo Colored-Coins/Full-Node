@@ -8,6 +8,7 @@ var auth = require('basic-auth')
 var path = require('path-extra')
 var ospath = require('ospath')
 var socketio = require('socket.io')
+var cors = require('cors')
 
 var propertiesFilePath = path.join(ospath.data(), 'coloredcoins-full-node', 'properties.conf')
 var config = require(path.join(__dirname, '/../utils/config.js'))(propertiesFilePath)
@@ -45,6 +46,7 @@ var launchServer = function (type) {
 }
 
 var app = express()
+app.use(cors())
 app.use(morgan)
 app.use(bodyParser.json())                              // Support for JSON-encoded bodies
 app.use(bodyParser.urlencoded({ extended: true }))      // Support for URL-encoded bodies
