@@ -408,7 +408,7 @@ module.exports = function (args) {
 
   var importAddresses = function (args, cb) {
     var addresses = args.addresses
-    var reindex = !!args.reindex
+    var reindex = args.reindex === 'true' || args.reindex === true
     var newAddresses
     var importedAddresses
     var ended = false
@@ -581,7 +581,7 @@ module.exports = function (args) {
     var skip = 0
     var count = 10
     var transactions = {}
-    
+
     async.whilst(function () { return next }, function (cb) {
       bitcoin.cmd('listtransactions', [label, count, skip, true], function (err, transactions) {
         if (err) return cb(err)
