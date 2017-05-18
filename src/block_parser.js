@@ -152,6 +152,33 @@ module.exports = function (args) {
     return coloredData
   }
 
+  var getPreviousOutputs = function(transaction, cb) {
+    var prevTxs = []
+
+    transaction.vin.forEach(function(vin) {
+      prevTxs.push(vin)
+    })
+
+    var prevOutsBatch = prevTxs.map(function(vin) { return { 'method': 'getrawtransaction', 'params': [vin.txid] } })
+    bitcoin.cmd(prevOutsBatch, function (rawTransaction, cb) {
+      var prevTx = decodeRawTransaction(bitcoinjs.Transaction.fromHex(rawTransaction))
+      var txid = prevTx.id
+      prevTxs.forEach(function(vin) {
+        vin.previousOutput = prevTx.vout[vin.vout]
+        if(vin.previousOutput.scriptPubKey && vin.previousOutput.scriptPubKey.addresses) {
+          vin.previousOutput.addresses = vin.previousOutput.scriptPubKey.addresses
+        }
+      })
+      cb()
+    }, function(err) {
+      if (err) return cb(err)
+
+      transaction.fee = transaction.vin.reduce(function(sum, vin) { return sum + vin.previousOutput.value }, 0) - transaction.vout.reduce(function(sum, vout) { return sum+ vout.value }, 0)
+      transaction.totalsent = transaction.vin.reduce(function(sum, vin) { return sum + vin.previousOutput.value }, 0)
+      cb(null, transaction)
+    })
+  }
+
   var parseTransaction = function (transaction, utxosChanges, blockHeight, cb) {
     async.each(transaction.vin, function (input, cb) {
       var previousOutput = input.txid + ':' + input.vout
@@ -175,7 +202,11 @@ module.exports = function (args) {
           utxosChanges.unused[transaction.txid + ':' + outputIndex] = JSON.stringify(assets)
         }
       })
-      emitter.emit('newcctransaction', transaction)
+      getPreviousOutputs(transaction, function(err, tx) {
+        if(err) return err
+        emitter.emit('newcctransaction', tx)
+        emitter.emit('newtransaction', tx)
+      })
       cb()
     })
   }
@@ -290,7 +321,10 @@ module.exports = function (args) {
       utxosChanges.txids.push(transaction.txid)
       var coloredData = getColoredData(transaction)
       if (!coloredData) {
-        emitter.emit('newtransaction', transaction)
+        getPreviousOutputs(transaction, function(err, tx) {
+          if(err) return err
+          emitter.emit('newtransaction', tx)
+        })
         return process.nextTick(cb)
       }
       transaction.ccdata = [coloredData]
@@ -363,7 +397,10 @@ module.exports = function (args) {
       var coloredData = getColoredData(newMempoolTransaction)
       if (!coloredData) {
         nonColoredTxids.push(newMempoolTransaction.txid)
-        emitter.emit('newtransaction', newMempoolTransaction)
+        getPreviousOutputs(newMempoolTransaction, function(err, tx) {
+          if(err) return err
+          emitter.emit('newtransaction', tx)
+        })
         return process.nextTick(cb)
       }
       newMempoolTransaction.ccdata = [coloredData]
