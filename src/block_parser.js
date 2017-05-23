@@ -658,7 +658,7 @@ module.exports = function (args) {
               transaction.blocktime = tx.blocktime * 1000
             } else {
               transaction.blockheight = -1
-              transaction.blocktime = -1
+              transaction.blocktime = tx.timereceived
             }
             transactions[transaction.txid] = transaction
             cb()
