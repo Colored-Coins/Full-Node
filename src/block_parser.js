@@ -152,6 +152,42 @@ module.exports = function (args) {
     return coloredData
   }
 
+  var getPreviousOutputs = function(transaction, cb) {
+    var prevTxs = []
+
+    transaction.vin.forEach(function(vin) {
+      prevTxs.push(vin)
+    })
+
+    var prevOutsBatch = prevTxs.map(function(vin) { return { 'method': 'getrawtransaction', 'params': [vin.txid] } })
+    bitcoin.cmd(prevOutsBatch, function (rawTransaction, cb) {
+      var prevTx = decodeRawTransaction(bitcoinjs.Transaction.fromHex(rawTransaction))
+      var txid = prevTx.id
+      prevTxs.forEach(function(vin) {
+        vin.previousOutput = prevTx.vout[vin.vout]
+        if(vin.previousOutput && vin.previousOutput.scriptPubKey && vin.previousOutput.scriptPubKey.addresses) {
+          vin.previousOutput.addresses = vin.previousOutput.scriptPubKey.addresses
+        }
+      })
+      cb()
+    }, function(err) {
+      if (err) return cb(err)
+      transaction.fee = transaction.vin.reduce(function(sum, vin) {
+        if (vin.previousOutput) {
+          return sum + vin.previousOutput.value
+        }
+        return sum
+      }, 0) - transaction.vout.reduce(function(sum, vout) { return sum + vout.value }, 0)
+      transaction.totalsent = transaction.vin.reduce(function(sum, vin) {
+        if (vin.previousOutput) {
+          return sum + vin.previousOutput.value
+        }
+        return sum
+      }, 0)
+      cb(null, transaction)
+    })
+  }
+
   var parseTransaction = function (transaction, utxosChanges, blockHeight, cb) {
     async.each(transaction.vin, function (input, cb) {
       var previousOutput = input.txid + ':' + input.vout
@@ -175,7 +211,11 @@ module.exports = function (args) {
           utxosChanges.unused[transaction.txid + ':' + outputIndex] = JSON.stringify(assets)
         }
       })
-      emitter.emit('newcctransaction', transaction)
+      getPreviousOutputs(transaction, function(err, tx) {
+        if(err) return err
+        emitter.emit('newcctransaction', tx)
+        emitter.emit('newtransaction', tx)
+      })
       cb()
     })
   }
@@ -290,7 +330,10 @@ module.exports = function (args) {
       utxosChanges.txids.push(transaction.txid)
       var coloredData = getColoredData(transaction)
       if (!coloredData) {
-        emitter.emit('newtransaction', transaction)
+        getPreviousOutputs(transaction, function(err, tx) {
+          if(err) return err
+          emitter.emit('newtransaction', tx)
+        })
         return process.nextTick(cb)
       }
       transaction.ccdata = [coloredData]
@@ -363,7 +406,10 @@ module.exports = function (args) {
       var coloredData = getColoredData(newMempoolTransaction)
       if (!coloredData) {
         nonColoredTxids.push(newMempoolTransaction.txid)
-        emitter.emit('newtransaction', newMempoolTransaction)
+        getPreviousOutputs(newMempoolTransaction, function(err, tx) {
+          if(err) return err
+          emitter.emit('newtransaction', tx)
+        })
         return process.nextTick(cb)
       }
       newMempoolTransaction.ccdata = [coloredData]
@@ -600,52 +646,55 @@ module.exports = function (args) {
     }, function (err) {
       if (err) return cb(err)
       var batch = txids.map(function(txid) { return { 'method': 'getrawtransaction', 'params': [txid] } })
-      bitcoin.cmd(batch, function (rawTransaction, cb) {
-        var transaction = decodeRawTransaction(bitcoinjs.Transaction.fromHex(rawTransaction))
-        var tx = txs[transaction.txid]
-        addColoredIOs(transaction, function(err) {
-          transaction.confirmations = tx.confirmations
-          if (transaction.confirmations) {
-            transaction.blockheight = tx.blockindex
-            transaction.blocktime = tx.blocktime
-          } else {
-            transaction.blockheight = -1
-            transaction.blocktime = -1
-          }
-          transactions[transaction.txid] = transaction
-          cb()
-        })
-      }, function(err) {
+      bitcoin.cmd('getblockcount', [], function(err, count) {
         if (err) return cb(err)
-
-        var prevOutputIndex = {}
-
-        Object.values(transactions).forEach(function(tx) {
-          tx.vin.forEach(function(vin) {
-            prevOutputIndex[vin.txid] = prevOutputIndex[vin.txid] || []
-            prevOutputIndex[vin.txid].push(vin)
-          })
-        })
-
-        var prevOutsBatch = Object.keys(prevOutputIndex).map(function(txid) { return { 'method': 'getrawtransaction', 'params': [txid] } })
-        bitcoin.cmd(prevOutsBatch, function (rawTransaction, cb) {
+        bitcoin.cmd(batch, function (rawTransaction, cb) {
           var transaction = decodeRawTransaction(bitcoinjs.Transaction.fromHex(rawTransaction))
-          var txid = transaction.id
-          prevOutputIndex[transaction.txid].forEach(function(vin) {
-            vin.previousOutput = transaction.vout[vin.vout]
-            if(vin.previousOutput.scriptPubKey && vin.previousOutput.scriptPubKey.addresses) {
-              vin.previousOutput.addresses = vin.previousOutput.scriptPubKey.addresses
+          var tx = txs[transaction.txid]
+          addColoredIOs(transaction, function(err) {
+            transaction.confirmations = tx.confirmations
+            if (transaction.confirmations) {
+              transaction.blockheight = count - transaction.confirmations + 1
+              transaction.blocktime = tx.blocktime * 1000
+            } else {
+              transaction.blockheight = -1
+              transaction.blocktime = tx.timereceived
             }
+            transactions[transaction.txid] = transaction
+            cb()
           })
-          cb()
         }, function(err) {
           if (err) return cb(err)
 
+          var prevOutputIndex = {}
+
           Object.values(transactions).forEach(function(tx) {
-            tx.fee = tx.vin.reduce(function(sum, vin) { return sum + vin.previousOutput.value }, 0) - tx.vout.reduce(function(sum, vout) { return sum+ vout.value }, 0)
-            tx.totalsent = tx.vin.reduce(function(sum, vin) { return sum + vin.previousOutput.value }, 0)
+            tx.vin.forEach(function(vin) {
+              prevOutputIndex[vin.txid] = prevOutputIndex[vin.txid] || []
+              prevOutputIndex[vin.txid].push(vin)
+            })
           })
-          cb(null, Object.values(transactions))
+
+          var prevOutsBatch = Object.keys(prevOutputIndex).map(function(txid) { return { 'method': 'getrawtransaction', 'params': [txid] } })
+          bitcoin.cmd(prevOutsBatch, function (rawTransaction, cb) {
+            var transaction = decodeRawTransaction(bitcoinjs.Transaction.fromHex(rawTransaction))
+            var txid = transaction.id
+            prevOutputIndex[transaction.txid].forEach(function(vin) {
+              vin.previousOutput = transaction.vout[vin.vout]
+              if(vin.previousOutput.scriptPubKey && vin.previousOutput.scriptPubKey.addresses) {
+                vin.previousOutput.addresses = vin.previousOutput.scriptPubKey.addresses
+              }
+            })
+            cb()
+          }, function(err) {
+            if (err) return cb(err)
+
+            Object.values(transactions).forEach(function(tx) {
+              tx.fee = tx.vin.reduce(function(sum, vin) { return sum + vin.previousOutput.value }, 0) - tx.vout.reduce(function(sum, vout) { return sum+ vout.value }, 0)
+              tx.totalsent = tx.vin.reduce(function(sum, vin) { return sum + vin.previousOutput.value }, 0)
+            })
+            cb(null, Object.values(transactions))
+          })
         })
       })
     })
