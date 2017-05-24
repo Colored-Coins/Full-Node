@@ -7,6 +7,13 @@ var routes = [
     optionalParams: ['numOfConfirmations']
   },
   {
+    path: '/getUtxos',
+    method: 'post',
+    functionName: 'getUtxos',
+    params: ['utxos'],
+    optionalParams: ['numOfConfirmations']
+  },
+  {
     path: '/getAddressesTransactions',
     method: 'post',
     functionName: 'getAddressesTransactions',

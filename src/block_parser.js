@@ -569,6 +569,33 @@ module.exports = function (args) {
     })
   }
 
+  var getUtxos = function (args, cb) {
+    var reqUtxos = args.utxos
+    var numOfConfirmations = args.numOfConfirmations || 0
+    bitcoin.cmd('getblockcount', [], function(err, count) {
+      if (err) return cb(err)
+      bitcoin.cmd('listunspent', [numOfConfirmations, 99999999], function (err, utxos) {
+        if (err) return cb(err)
+        utxos = utxos.filter(utxo => reqUtxos.findIndex(reqUtxo => reqUtxo.txid === utxo.txid && reqUtxo.index === utxo.vout) !== -1)
+        async.each(utxos, function (utxo, cb) {
+          redis.hget('utxos', utxo.txid + ':' + utxo.vout, function (err, assets) {
+            if (err) return cb(err)
+            utxo.assets = assets && JSON.parse(assets) || []
+            if (utxo.confirmations) {
+              utxo.blockheight = count - utxo.confirmations + 1
+            } else {
+              utxo.blockheight = -1
+            }
+            cb()
+          })
+        }, function (err) {
+          if (err) return cb(err)
+          cb(null, utxos)
+        })
+      })
+    })
+  }
+
   var transmit = function (args, cb) {
     var txHex = args.txHex
     bitcoin.cmd('sendrawtransaction', [txHex], function(err, res) {
@@ -734,6 +761,7 @@ module.exports = function (args) {
     parse: parse,
     importAddresses: importAddresses,
     getAddressesUtxos: getAddressesUtxos,
+    getUtxos: getUtxos,
     getAddressesTransactions: getAddressesTransactions,
     transmit: transmit,
     getInfo: getInfo,
