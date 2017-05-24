@@ -728,9 +728,27 @@ module.exports = function (args) {
   }
 
   var getBitcoindInfo = function (cb) {
-    bitcoin.cmd('getinfo', [], function (err, btcInfo) {
+    var btcInfo
+    async.waterfall([
+      function (cb) {
+        bitcoin.cmd('getinfo', [], cb)
+      },
+      function (_btcInfo, cb) {
+        if (typeof _btcInfo === 'function') {
+          cb = _btcInfo
+          _btcInfo = null
+        }
+        if (!_btcInfo) return cb('No reply from getinfo')
+        btcInfo = _btcInfo
+        bitcoin.cmd('getblockhash', [btcInfo.blocks], cb)
+      },
+      function (lastBlockHash, cb) {
+        bitcoin.cmd('getblock', [lastBlockHash], cb)
+      }
+    ],
+    function (err, lastBlockInfo) {
       if (err) return cb(err)
-      if (!btcInfo) return cb('No reply from getinfo')
+      btcInfo.timestamp = lastBlockInfo.time
       btcInfo.cctimestamp = info.cctimestamp
       btcInfo.ccheight = info.ccheight
       cb(null, btcInfo)
