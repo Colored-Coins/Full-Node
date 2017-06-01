@@ -211,11 +211,8 @@ module.exports = function (args) {
           utxosChanges.unused[transaction.txid + ':' + outputIndex] = JSON.stringify(assets)
         }
       })
-      getPreviousOutputs(transaction, function(err, tx) {
-        if(err) return err
-        emitter.emit('newcctransaction', tx)
-        emitter.emit('newtransaction', tx)
-      })
+      emitter.emit('newcctransaction', transaction)
+      emitter.emit('newtransaction', transaction)
       cb()
     })
   }
@@ -330,10 +327,7 @@ module.exports = function (args) {
       utxosChanges.txids.push(transaction.txid)
       var coloredData = getColoredData(transaction)
       if (!coloredData) {
-        getPreviousOutputs(transaction, function(err, tx) {
-          if(err) return err
-          emitter.emit('newtransaction', tx)
-        })
+        emitter.emit('newtransaction', transaction)
         return process.nextTick(cb)
       }
       transaction.ccdata = [coloredData]
@@ -406,10 +400,7 @@ module.exports = function (args) {
       var coloredData = getColoredData(newMempoolTransaction)
       if (!coloredData) {
         nonColoredTxids.push(newMempoolTransaction.txid)
-        getPreviousOutputs(newMempoolTransaction, function(err, tx) {
-          if(err) return err
-          emitter.emit('newtransaction', tx)
-        })
+        emitter.emit('newtransaction', newMempoolTransaction)
         return process.nextTick(cb)
       }
       newMempoolTransaction.ccdata = [coloredData]
@@ -602,8 +593,19 @@ module.exports = function (args) {
       if (err) {
         return cb(err)
       } else {
-        return cb(err, '{ "txid": "' +  res + '" }')
+        cb(err, '{ "txid": "' +  res + '" }')
       }
+      var transaction = decodeRawTransaction(bitcoinjs.Transaction.fromHex(txHex))
+      addColoredIOs(transaction, function(err, colored_tx){
+        if (err) return
+        getPreviousOutputs(colored_tx, function(err, tx) {
+          if(err) return
+          emitter.emit('newtransaction', tx)
+          if (tx.colored) {
+            emitter.emit('newcctransaction', tx)
+          }
+        })
+      })
     })
   }
 
