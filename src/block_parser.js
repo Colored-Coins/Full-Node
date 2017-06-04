@@ -592,18 +592,17 @@ module.exports = function (args) {
     bitcoin.cmd('sendrawtransaction', [txHex], function(err, res) {
       if (err) {
         return cb(err)
-      } else {
-        cb(err, '{ "txid": "' +  res + '" }')
       }
       var transaction = decodeRawTransaction(bitcoinjs.Transaction.fromHex(txHex))
       addColoredIOs(transaction, function(err, colored_tx){
-        if (err) return
+        if (err) return cb(null, '{ "txid": "' +  res + '" }')
         getPreviousOutputs(colored_tx, function(err, tx) {
-          if(err) return
+          if(err) return cb(null, '{ "txid": "' +  res + '" }')
           emitter.emit('newtransaction', tx)
           if (tx.colored) {
             emitter.emit('newcctransaction', tx)
           }
+          return cb(null, '{ "txid": "' +  res + '" }')
         })
       })
     })
