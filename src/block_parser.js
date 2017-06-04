@@ -211,11 +211,8 @@ module.exports = function (args) {
           utxosChanges.unused[transaction.txid + ':' + outputIndex] = JSON.stringify(assets)
         }
       })
-      getPreviousOutputs(transaction, function(err, tx) {
-        if(err) return err
-        emitter.emit('newcctransaction', tx)
-        emitter.emit('newtransaction', tx)
-      })
+      emitter.emit('newcctransaction', transaction)
+      emitter.emit('newtransaction', transaction)
       cb()
     })
   }
@@ -330,10 +327,7 @@ module.exports = function (args) {
       utxosChanges.txids.push(transaction.txid)
       var coloredData = getColoredData(transaction)
       if (!coloredData) {
-        getPreviousOutputs(transaction, function(err, tx) {
-          if(err) return err
-          emitter.emit('newtransaction', tx)
-        })
+        emitter.emit('newtransaction', transaction)
         return process.nextTick(cb)
       }
       transaction.ccdata = [coloredData]
@@ -406,10 +400,7 @@ module.exports = function (args) {
       var coloredData = getColoredData(newMempoolTransaction)
       if (!coloredData) {
         nonColoredTxids.push(newMempoolTransaction.txid)
-        getPreviousOutputs(newMempoolTransaction, function(err, tx) {
-          if(err) return err
-          emitter.emit('newtransaction', tx)
-        })
+        emitter.emit('newtransaction', newMempoolTransaction)
         return process.nextTick(cb)
       }
       newMempoolTransaction.ccdata = [coloredData]
@@ -601,9 +592,46 @@ module.exports = function (args) {
     bitcoin.cmd('sendrawtransaction', [txHex], function(err, res) {
       if (err) {
         return cb(err)
-      } else {
-        return cb(err, '{ "txid": "' +  res + '" }')
       }
+      var transaction = decodeRawTransaction(bitcoinjs.Transaction.fromHex(txHex))
+
+      var txsToParse = [transaction]
+
+      var txsToCheck = [transaction]
+
+      async.whilst(
+        function() { return txsToCheck.length > 0 },
+        function(callback) {
+          var txids = txsToCheck.map(function(tx) { return tx.vin.map(function(vin) { return vin.txid}) })
+          txids = [].concat.apply([], txids)
+          txids = [...new Set(txids)]
+          txsToCheck = []
+          getNewMempoolTxids(txids, function(err, txids) {
+            if (err) return callback(err)
+            if (txids.length == 0) return callback()
+            var batch = txids.map(function(txid) { return { 'method': 'getrawtransaction', 'params': [txid] } })
+            bitcoin.cmd(
+              batch,
+              function (rawTransaction, cb) {
+                var tx = decodeRawTransaction(bitcoinjs.Transaction.fromHex(rawTransaction))
+                txsToCheck.push(tx)
+                txsToParse.unshift(tx)
+              },
+              function(err) {
+                if (err) return callback(err)
+                return callback()
+              }
+            )
+          })
+        },
+        function (err) {
+          if (err) return cb(null, '{ "txid": "' +  res + '" }')
+          parseNewMempoolTransactions(txsToParse, function(err) {
+            if (err) return cb(null, '{ "txid": "' +  res + '" }')
+            return cb(null, '{ "txid": "' +  res + '" }')
+          })
+        }
+      )
     })
   }
 
